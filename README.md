@@ -153,6 +153,18 @@ The coordinate extraction and route solver will work on any ARK map — only the
 
 ---
 
+## Updating
+
+Click the **Check for Updates** button in the bottom left of the app. It will check GitHub for the latest release and compare it against your current version (shown in the top right corner).
+
+- If you're up to date, it will say so in the log
+- If an update is available, it will download it automatically and the button will turn green and say **Relaunch to Update**
+- Click **Relaunch to Update** — the app will close and reopen with the new version applied automatically
+
+An internet connection is required to check for and download updates.
+
+---
+
 ## Credits
 
 Built by **matt430**
