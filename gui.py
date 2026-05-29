@@ -1,6 +1,7 @@
 """ARK Dino Pathfinder — GUI entry point (customtkinter)."""
 
 import sys
+import tempfile
 import threading
 from pathlib import Path
 from tkinter import filedialog
@@ -23,6 +24,8 @@ class App(ctk.CTk):
         self.resizable(False, False)
         self.configure(fg_color="#0d1f2d")
         self._selected_files: list[str] = []
+        self._paste_dir = tempfile.mkdtemp()
+        self._paste_count = 0
         self._build_ui()
         threading.Thread(target=self._preload, daemon=True).start()
 
@@ -30,7 +33,11 @@ class App(ctk.CTk):
         ctk.CTkLabel(
             self, text="ARK Dino Pathfinder",
             font=("Arial", 22, "bold"), text_color="cyan",
-        ).pack(pady=(20, 4))
+        ).pack(pady=(20, 2))
+        ctk.CTkLabel(
+            self, text="by matt430",
+            font=("Arial", 11), text_color="#aaccdd",
+        ).pack(pady=(0, 8))
 
         # ── file selection ────────────────────────────────────────────────
         file_frame = ctk.CTkFrame(self, fg_color="#102030", corner_radius=8)
@@ -52,6 +59,8 @@ class App(ctk.CTk):
             state="disabled",
         )
         self._file_box.pack(fill="x", padx=12, pady=(0, 10))
+        self._file_box.bind("<Button-1>", lambda e: self._file_box.focus_set())
+        self._file_box.bind("<Control-v>", self._paste_image)
 
         # ── output path ───────────────────────────────────────────────────
         out_frame = ctk.CTkFrame(self, fg_color="#102030", corner_radius=8)
@@ -93,6 +102,22 @@ class App(ctk.CTk):
             if p not in self._selected_files:
                 self._selected_files.append(p)
         self._refresh_file_box()
+
+    def _paste_image(self, event=None):
+        from PIL import ImageGrab
+        try:
+            img = ImageGrab.grabclipboard()
+        except Exception:
+            return "break"
+        if img is None:
+            return "break"
+        self._paste_count += 1
+        path = str(Path(self._paste_dir) / f"pasted_{self._paste_count}.png")
+        img.save(path, "PNG")
+        if path not in self._selected_files:
+            self._selected_files.append(path)
+        self._refresh_file_box()
+        return "break"
 
     def _clear_files(self):
         self._selected_files.clear()
