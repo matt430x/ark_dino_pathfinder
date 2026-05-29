@@ -1,0 +1,192 @@
+"""ARK Dino Pathfinder — GUI entry point (customtkinter)."""
+
+import sys
+import threading
+from pathlib import Path
+from tkinter import filedialog
+
+import customtkinter as ctk
+
+from extract import extract_coordinates
+from route import solve_tsp
+from visualize import plot_route
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("ARK Dino Pathfinder")
+        self.geometry("640x680")
+        self.resizable(False, False)
+        self.configure(fg_color="#0d1f2d")
+        self._selected_files: list[str] = []
+        self._build_ui()
+        threading.Thread(target=self._preload, daemon=True).start()
+
+    def _build_ui(self):
+        ctk.CTkLabel(
+            self, text="ARK Dino Pathfinder",
+            font=("Arial", 22, "bold"), text_color="cyan",
+        ).pack(pady=(20, 4))
+
+        # ── file selection ────────────────────────────────────────────────
+        file_frame = ctk.CTkFrame(self, fg_color="#102030", corner_radius=8)
+        file_frame.pack(fill="x", padx=20, pady=8)
+
+        btn_row = ctk.CTkFrame(file_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(btn_row, text="Screenshots", text_color="#aaccdd",
+                     font=("Arial", 13)).pack(side="left")
+        ctk.CTkButton(btn_row, text="Clear", width=70,
+                      fg_color="#1a3a4a", hover_color="#2a4a5a",
+                      command=self._clear_files).pack(side="right", padx=(4, 0))
+        ctk.CTkButton(btn_row, text="Add Files", width=90,
+                      command=self._add_files).pack(side="right")
+
+        self._file_box = ctk.CTkTextbox(
+            file_frame, height=110,
+            fg_color="#0d1f2d", text_color="#aaccdd",
+            state="disabled",
+        )
+        self._file_box.pack(fill="x", padx=12, pady=(0, 10))
+
+        # ── output path ───────────────────────────────────────────────────
+        out_frame = ctk.CTkFrame(self, fg_color="#102030", corner_radius=8)
+        out_frame.pack(fill="x", padx=20, pady=(0, 8))
+
+        ctk.CTkLabel(out_frame, text="Output", text_color="#aaccdd",
+                     font=("Arial", 13)).pack(side="left", padx=12, pady=10)
+        self._out_var = ctk.StringVar(value="route_map.png")
+        ctk.CTkEntry(out_frame, textvariable=self._out_var,
+                     fg_color="#0d1f2d", text_color="white").pack(
+            side="left", fill="x", expand=True, pady=10)
+        ctk.CTkButton(out_frame, text="Browse", width=80,
+                      command=self._browse_output).pack(side="right", padx=12, pady=10)
+
+        # ── run button ────────────────────────────────────────────────────
+        self._run_btn = ctk.CTkButton(
+            self, text="Run", height=42,
+            font=("Arial", 15, "bold"),
+            command=self._run,
+        )
+        self._run_btn.pack(padx=20, pady=(0, 8), fill="x")
+
+        # ── log ───────────────────────────────────────────────────────────
+        ctk.CTkLabel(self, text="Log", text_color="#aaccdd",
+                     font=("Arial", 13)).pack(anchor="w", padx=20)
+        self._log = ctk.CTkTextbox(
+            self, fg_color="#0d1f2d", text_color="#aaccdd", state="disabled",
+        )
+        self._log.pack(fill="both", expand=True, padx=20, pady=(4, 20))
+
+    # ── file helpers ──────────────────────────────────────────────────────
+
+    def _add_files(self):
+        paths = filedialog.askopenfilenames(
+            title="Select Dino Scanner screenshots",
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp *.tiff"), ("All files", "*.*")],
+        )
+        for p in paths:
+            if p not in self._selected_files:
+                self._selected_files.append(p)
+        self._refresh_file_box()
+
+    def _clear_files(self):
+        self._selected_files.clear()
+        self._refresh_file_box()
+
+    def _refresh_file_box(self):
+        self._file_box.configure(state="normal")
+        self._file_box.delete("1.0", "end")
+        for p in self._selected_files:
+            self._file_box.insert("end", Path(p).name + "\n")
+        self._file_box.configure(state="disabled")
+
+    def _browse_output(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG image", "*.png")],
+            initialfile="route_map.png",
+        )
+        if path:
+            self._out_var.set(path)
+
+    # ── log helpers ───────────────────────────────────────────────────────
+
+    def _log_write(self, text: str):
+        self.after(0, self._log_append, text)
+
+    def _log_append(self, text: str):
+        self._log.configure(state="normal")
+        self._log.insert("end", text)
+        self._log.see("end")
+        self._log.configure(state="disabled")
+
+    # ── preload ───────────────────────────────────────────────────────────
+
+    def _preload(self):
+        """Import EasyOCR/PyTorch in the background so Run fires instantly."""
+        from extract import _get_reader
+        try:
+            _get_reader()
+        except Exception:
+            pass
+
+    # ── pipeline ──────────────────────────────────────────────────────────
+
+    def _run(self):
+        if not self._selected_files:
+            self._log_append("No screenshots selected.\n")
+            return
+        self._run_btn.configure(state="disabled")
+        self._log.configure(state="normal")
+        self._log.delete("1.0", "end")
+        self._log.configure(state="disabled")
+        threading.Thread(target=self._pipeline, daemon=True).start()
+
+    def _pipeline(self):
+        old_stdout = sys.stdout
+        sys.stdout = _Redirect(self._log_write)
+        try:
+            coords = extract_coordinates(list(self._selected_files))
+            if not coords:
+                self._log_write("\nNo coordinates found.\n")
+                return
+            route = solve_tsp(coords)
+            total = sum(
+                ((coords[route[i]][0] - coords[route[i - 1]][0]) ** 2
+                 + (coords[route[i]][1] - coords[route[i - 1]][1]) ** 2) ** 0.5
+                for i in range(1, len(route))
+            )
+            self._log_write(f"\nOptimal route — {len(coords)} stops, distance {total:.1f}\n")
+            for step, idx in enumerate(route, 1):
+                lat, lon = coords[idx]
+                self._log_write(f"  Step {step:3d}:  Lat {lat:6.2f}  Long {lon:6.2f}\n")
+            out = self._out_var.get()
+            self.after(0, plot_route, coords, route, out)
+        except Exception as exc:
+            self._log_write(f"\nError: {exc}\n")
+        finally:
+            sys.stdout = old_stdout
+            self.after(0, lambda: self._run_btn.configure(state="normal"))
+
+
+class _Redirect:
+    """Pipe stdout writes to the log widget."""
+    def __init__(self, write_fn):
+        self._write = write_fn
+
+    def write(self, text: str):
+        if text:
+            self._write(text)
+
+    def flush(self):
+        pass
+
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
