@@ -119,7 +119,7 @@ Fjordur has three special sub-realms. The map shows their approximate boundaries
 
 Press **L** to hide/show these overlays if they clutter your view.
 
-**Note:** The boundaries you see on the map are NOT exact. They may extend further outward or further inward in some areas. It is extremely difficult to get the exact bounaries of the 3 sub-realms, so I approximated by going as far out into the corners as I could. 
+> **Note:** The boundaries shown on the map are NOT exact. They may extend further outward or inward in some areas. The exact boundaries of the three sub-realms are extremely difficult to measure, so they have been approximated by going as far out into the corners as possible.
 
 ---
 
