@@ -118,8 +118,6 @@ class App(ctk.CTk):
         # ── bottom bar ────────────────────────────────────────────────────
         bottom = ctk.CTkFrame(self, fg_color="transparent")
         bottom.pack(fill="x", padx=20, pady=(0, 12))
-        ctk.CTkLabel(bottom, text=f"v{VERSION}", text_color="#445566",
-                     font=("Arial", 11)).pack(side="left")
         self._update_btn = ctk.CTkButton(
             bottom, text="Check for Updates", width=150,
             fg_color="#1a3a4a", hover_color="#2a4a5a",
