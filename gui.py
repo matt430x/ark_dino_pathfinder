@@ -17,7 +17,7 @@ from extract import extract_coordinates
 from route import solve_tsp
 from visualize import plot_route
 
-VERSION = "1.1"
+VERSION = "1.2"
 _GITHUB_API = "https://api.github.com/repos/matt430x/ark_dino_pathfinder/releases/latest"
 
 ctk.set_appearance_mode("dark")
