@@ -3,7 +3,7 @@
 
 A tool for ARK: Survival Evolved / Ascended players that reads your Dino Scanner screenshots, extracts all the coordinates automatically using OCR, solves the optimal visit route, and displays it on an interactive map — so you never waste time backtracking across the map again.
 
-<img width="885" height="883" alt="route_map" src="https://github.com/user-attachments/assets/c19d3970-d835-49ce-ac4f-e008c7a54094" />
+<img width="885" height="883" alt="route_map" src="https://github.com/user-attachments/assets/2b722552-f00f-45ea-a831-902d242cc9ea" />
 
 ---
 
