@@ -1,10 +1,11 @@
 """OCR-based coordinate extraction from ARK Dino Scanner screenshots."""
 
+import gc
 import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Callable, Optional, List, Tuple
 
 from PIL import Image
 
@@ -28,22 +29,40 @@ def _get_reader():
     return _reader
 
 
-def extract_coordinates(image_paths: List[str]) -> List[Tuple[float, float]]:
+def unload_reader():
+    """Release the OCR engine from memory."""
+    global _reader
+    _reader = None
+    gc.collect()
+    try:
+        import torch
+        torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def extract_coordinates(
+    image_paths: List[str],
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> List[Tuple[float, float]]:
     """Return deduplicated (lat, long) pairs from one or more screenshots."""
     reader = _get_reader()
     seen: set = set()
     coords: List[Tuple[float, float]] = []
-    for path in image_paths:
+    total = len(image_paths)
+    for i, path in enumerate(image_paths):
         print(f"  Processing: {Path(path).name}")
         for pair in _parse_image(path, reader):
             key = (round(pair[0], 2), round(pair[1], 2))
             if key not in seen:
                 seen.add(key)
                 coords.append(pair)
+        if progress_callback:
+            progress_callback(i + 1, total)
     return coords
 
 
-def _parse_image(path: str, reader: easyocr.Reader) -> List[Tuple[float, float]]:
+def _parse_image(path: str, reader) -> List[Tuple[float, float]]:
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp_path = tmp.name
     try:

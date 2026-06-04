@@ -13,11 +13,11 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
-from extract import extract_coordinates
+from extract import extract_coordinates, unload_reader
 from route import solve_tsp
 from visualize import plot_route
 
-VERSION = "1.2"
+VERSION = "1.4"
 _GITHUB_API = "https://api.github.com/repos/matt430x/ark_dino_pathfinder/releases/latest"
 
 ctk.set_appearance_mode("dark")
@@ -36,7 +36,6 @@ class App(ctk.CTk):
         self._paste_count = 0
         self._cleanup_old_files()
         self._build_ui()
-        threading.Thread(target=self._preload, daemon=True).start()
 
     def _cleanup_old_files(self):
         """Remove leftover temp files from a previous update."""
@@ -107,9 +106,18 @@ class App(ctk.CTk):
         )
         self._run_btn.pack(padx=20, pady=(0, 8), fill="x")
 
-        # ── log ───────────────────────────────────────────────────────────
-        ctk.CTkLabel(self, text="Log", text_color="#aaccdd",
-                     font=("Arial", 13)).pack(anchor="w", padx=20)
+        # ── progress bar (hidden until screenshot processing) ────────────
+        self._progress = ctk.CTkProgressBar(self, height=12)
+        # not packed yet — shown dynamically during pipeline
+
+        # ── log header (label left, spinner right) ────────────────────────
+        self._log_header = ctk.CTkFrame(self, fg_color="transparent")
+        self._log_header.pack(fill="x", padx=20)
+        ctk.CTkLabel(self._log_header, text="Log", text_color="#aaccdd",
+                     font=("Arial", 13)).pack(side="left")
+        self._spinner_lbl = ctk.CTkLabel(self._log_header, text="",
+                                         font=("Arial", 14), text_color="cyan")
+        self._spinner_lbl.pack(side="right")
         self._log = ctk.CTkTextbox(
             self, fg_color="#0d1f2d", text_color="#aaccdd", state="disabled",
         )
@@ -185,15 +193,42 @@ class App(ctk.CTk):
         self._log.see("end")
         self._log.configure(state="disabled")
 
-    # ── preload ───────────────────────────────────────────────────────────
+    # ── spinner helpers (main thread only) ───────────────────────────────
 
-    def _preload(self):
-        """Import EasyOCR/PyTorch in the background so Run fires instantly."""
-        from extract import _get_reader
-        try:
-            _get_reader()
-        except Exception:
-            pass
+    _SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    _spinner_idx = 0
+    _spinner_running = False
+
+    def _spinner_start(self):
+        self._spinner_running = True
+        self._spinner_idx = 0
+        self._animate_spinner()
+
+    def _spinner_stop(self):
+        self._spinner_running = False
+        self._spinner_lbl.configure(text="")
+
+    def _animate_spinner(self):
+        if not self._spinner_running:
+            return
+        self._spinner_lbl.configure(
+            text=self._SPINNER_FRAMES[self._spinner_idx % len(self._SPINNER_FRAMES)]
+        )
+        self._spinner_idx += 1
+        self.after(100, self._animate_spinner)
+
+    # ── progress bar helpers (main thread only) ───────────────────────────
+
+    def _progress_show_determinate(self):
+        self._progress.configure(mode="determinate")
+        self._progress.set(0)
+        self._progress.pack(padx=20, pady=(0, 4), fill="x", before=self._log_header)
+
+    def _progress_set(self, value: float):
+        self._progress.set(value)
+
+    def _progress_hide(self):
+        self._progress.pack_forget()
 
     # ── update ────────────────────────────────────────────────────────────
 
@@ -291,7 +326,6 @@ class App(ctk.CTk):
 
         app_dir = str(Path(sys.executable).parent)
 
-        # Write a hidden batch script that copies files and relaunches after we exit
         bat_path = os.path.join(tempfile.gettempdir(), "ark_update.bat")
         bat = (
             "@echo off\n"
@@ -326,26 +360,48 @@ class App(ctk.CTk):
         old_stdout = sys.stdout
         sys.stdout = _Redirect(self._log_write)
         try:
-            coords = extract_coordinates(list(self._selected_files))
+            self.after(0, self._spinner_start)
+
+            # Phase 1 — load OCR engine
+            self._log_write("Loading OCR engine...\n")
+            from extract import _get_reader
+            _get_reader()
+
+            # Phase 2 — process screenshots (determinate bar)
+            self.after(0, self._progress_show_determinate)
+
+            def on_progress(current, total):
+                self.after(0, self._progress_set, current / total)
+
+            coords = extract_coordinates(list(self._selected_files),
+                                         progress_callback=on_progress)
+
             if not coords:
                 self._log_write("\nNo coordinates found.\n")
                 return
+
             route = solve_tsp(coords)
-            total = sum(
+            total_dist = sum(
                 ((coords[route[i]][0] - coords[route[i - 1]][0]) ** 2
                  + (coords[route[i]][1] - coords[route[i - 1]][1]) ** 2) ** 0.5
                 for i in range(1, len(route))
             )
-            self._log_write(f"\nOptimal route — {len(coords)} stops, distance {total:.1f}\n")
+            self._log_write(f"\nOptimal route — {len(coords)} stops, distance {total_dist:.1f}\n")
             for step, idx in enumerate(route, 1):
                 lat, lon = coords[idx]
                 self._log_write(f"  Step {step:3d}:  Lat {lat:6.2f}  Long {lon:6.2f}\n")
+
             out = self._out_var.get()
             self.after(0, plot_route, coords, route, out)
+
         except Exception as exc:
             self._log_write(f"\nError: {exc}\n")
         finally:
             sys.stdout = old_stdout
+            unload_reader()
+            self._log_write("OCR engine unloaded.\n")
+            self.after(0, self._spinner_stop)
+            self.after(0, self._progress_hide)
             self.after(0, lambda: self._run_btn.configure(state="normal"))
 
 

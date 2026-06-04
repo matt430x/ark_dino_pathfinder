@@ -71,6 +71,7 @@ def plot_route(
             label=realm["label"],
         )
         ax.add_patch(patch)
+        patch.set_visible(False)
         realm_patches.append(patch)
 
     ax.plot(lons, lats, "-", color="#0088cc", linewidth=1.8, alpha=0.7, zorder=2)
@@ -111,6 +112,7 @@ def plot_route(
     for spine in ax.spines.values():
         spine.set_edgecolor("#1a3a4a")
     legend = ax.legend(facecolor="#0d1f2d", labelcolor="white", framealpha=0.5, loc="upper right")
+    legend.set_visible(False)
 
     def _toggle_overlays(event):
         if event.key in ("l", "L"):
