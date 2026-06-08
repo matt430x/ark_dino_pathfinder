@@ -7,6 +7,10 @@ from PyQt6.QtCore import Qt
 
 _PADDING = 5.0
 
+# Minimum GPS-unit distance between two labeled waypoints.
+# Points closer than this get their label suppressed to avoid overlap.
+_MIN_LABEL_SEP = 4.0
+
 _REALMS = [
     {
         "label": "Asgard",
@@ -24,10 +28,6 @@ _REALMS = [
         "corners": [(-7.17, 102.93), (27.12, 104.70), (33.06, 67.14), (-7.32, 67.23)],
     },
 ]
-
-# Alternating label anchors + x-offsets so adjacent points don't stack
-_ANCHORS = [(0, 1), (1, 1), (0, 0), (1, 0)]   # TL, TR, BL, BR
-_OX      = [0.35,  -0.35,  0.35, -0.35]
 
 
 def plot_route(
@@ -84,16 +84,34 @@ def plot_route(
         size=16, symbol="star", pxMode=True,
     ))
 
-    # Step labels
+    # Step labels — quadrant-aware anchors + overlap suppression
+    lat_mid = (min(lats) + max(lats)) / 2
+    lon_mid = (min(lons) + max(lons)) / 2
+    labeled_positions: list[tuple[float, float]] = []
+
     for step, (lat, lon) in enumerate(zip(lats, lons)):
-        idx = step % 4
+        # Skip if another label is already too close (would overlap)
+        if any(
+            ((lat - ly) ** 2 + (lon - lx) ** 2) ** 0.5 < _MIN_LABEL_SEP
+            for ly, lx in labeled_positions
+        ):
+            continue
+        labeled_positions.append((lat, lon))
+
+        # Choose anchor so text always points toward the interior of the data
+        # anchor (0,*) → text right of point; (1,*) → text left of point
+        # anchor (*,0) → text below point;  (*,1) → text above point
+        ah = 0 if lon <= lon_mid else 1   # left half: extend right; right half: extend left
+        av = 1 if lat <= lat_mid else 0   # top half:  extend above; bottom half: extend below
+        ox = 0.3 if ah == 0 else -0.3
+
         label = pg.TextItem(
             text=f"{step + 1}: {lat:.2f}, {lon:.2f}",
             color=(255, 255, 255),
             fill=pg.mkBrush(13, 31, 45, 180),
-            anchor=_ANCHORS[idx],
+            anchor=(ah, av),
         )
-        label.setPos(lon + _OX[idx], lat)
+        label.setPos(lon + ox, lat)
         plot.addItem(label)
 
     # Realm overlays (hidden by default, toggled by the Realms button)
