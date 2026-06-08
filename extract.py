@@ -15,16 +15,33 @@ _reader = None
 _NUM = re.compile(r"^\d{1,3}\.\d{1,2}$")
 
 
+def _bundled_model_dir() -> Optional[str]:
+    """Return the path to the bundled EasyOCR models, or None to use the default."""
+    import sys
+
+    if getattr(sys, "frozen", False):
+        # PyInstaller onedir: sys._MEIPASS == dist/gui/_internal/
+        candidate = os.path.join(sys._MEIPASS, "easyocr_models")
+    else:
+        candidate = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+
+    return candidate if os.path.isdir(candidate) else None
+
+
 def _get_reader():
     global _reader
     if _reader is None:
         import easyocr
-        print("  Loading OCR engine (first run downloads ~100 MB)...")
+
+        model_dir = _bundled_model_dir()
+        kwargs = {"model_storage_directory": model_dir} if model_dir else {}
+
+        print("  Loading OCR engine...")
         try:
-            _reader = easyocr.Reader(["en"], gpu=True)
+            _reader = easyocr.Reader(["en"], gpu=True, **kwargs)
             print("  OCR running on GPU.")
         except Exception:
-            _reader = easyocr.Reader(["en"], gpu=False)
+            _reader = easyocr.Reader(["en"], gpu=False, **kwargs)
             print("  OCR running on CPU (no GPU available).")
     return _reader
 
