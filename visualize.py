@@ -1,17 +1,12 @@
-"""Render the optimized route on an ARK-styled coordinate map."""
+"""Render the optimized route on an ARK-styled map using PyQtGraph."""
 
-from typing import List, Tuple
+from typing import Callable, List, Tuple
 
-import matplotlib
-matplotlib.use("TkAgg")
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from adjustText import adjust_text
+import pyqtgraph as pg
+from PyQt6.QtCore import Qt
 
 _PADDING = 5.0
 
-# Fjordur realm boundaries in (lat, lon) = (y, x) format
 _REALMS = [
     {
         "label": "Asgard",
@@ -30,13 +25,19 @@ _REALMS = [
     },
 ]
 
+# Alternating label anchors + x-offsets so adjacent points don't stack
+_ANCHORS = [(0, 1), (1, 1), (0, 0), (1, 0)]   # TL, TR, BL, BR
+_OX      = [0.35,  -0.35,  0.35, -0.35]
+
 
 def plot_route(
     coords: List[Tuple[float, float]],
     route: List[int],
-    output_path: str = "route_map.png",
-) -> None:
-    """Draw and save the route map, then display it."""
+) -> Tuple[pg.PlotWidget, Callable]:
+    """Build and return a PlotWidget with the route drawn on it.
+
+    Must be called on the main Qt thread — PlotWidget is a QWidget.
+    """
     lats = [coords[i][0] for i in route]
     lons = [coords[i][1] for i in route]
 
@@ -45,91 +46,77 @@ def plot_route(
         for i in range(1, len(lats))
     )
 
-    fig, ax = plt.subplots(figsize=(6, 6), facecolor="#0d1f2d")
-    ax.set_facecolor("#0d1f2d")
-
-    # Fit view to waypoints only — realm outlines are clipped at the edges
-    ax.set_xlim(min(lons) - _PADDING, max(lons) + _PADDING)
-    ax.set_ylim(min(lats) - _PADDING, max(lats) + _PADDING)
-    ax.invert_yaxis()
-    ax.xaxis.set_major_locator(ticker.MultipleLocator(10))
-    ax.yaxis.set_major_locator(ticker.MultipleLocator(10))
-    ax.grid(color="#1a3a4a", linewidth=0.5, alpha=0.7)
-
-    # Realm outlines drawn first so they sit behind the route
-    realm_patches = []
-    for realm in _REALMS:
-        xy = [(lon, lat) for lat, lon in realm["corners"]]
-        patch = mpatches.Polygon(
-            xy,
-            closed=True,
-            fill=False,
-            edgecolor=realm["color"],
-            linewidth=1.5,
-            linestyle="--",
-            zorder=1,
-            label=realm["label"],
-        )
-        ax.add_patch(patch)
-        patch.set_visible(False)
-        realm_patches.append(patch)
-
-    ax.plot(lons, lats, "-", color="#0088cc", linewidth=1.8, alpha=0.7, zorder=2)
-    ax.scatter(lons, lats, color="cyan", s=55, zorder=4, edgecolors="white", linewidths=0.5)
-    ax.scatter([lons[0]], [lats[0]], color="#00ff88", s=200, zorder=6, marker="*", label="Start")
-
-    texts = []
-    for step, (lat, lon) in enumerate(zip(lats, lons)):
-        t = ax.text(
-            lon,
-            lat,
-            f"{step + 1}: {lat:.2f}, {lon:.2f}",
-            fontsize=7,
-            color="white",
-            zorder=5,
-            bbox=dict(boxstyle="round,pad=0.15", facecolor="#0d1f2d", alpha=0.6, linewidth=0),
-        )
-        texts.append(t)
-
-    adjust_text(
-        texts,
-        x=lons,
-        y=lats,
-        ax=ax,
-        expand=(1.4, 1.6),
-        arrowprops=dict(arrowstyle="-", color="#aaccdd", lw=0.7),
-    )
-
-    ax.set_xlabel("Longitude (East →)", color="#aaccdd", fontsize=11)
-    ax.set_ylabel("Latitude (South ↓)", color="#aaccdd", fontsize=11)
-    ax.set_title(
+    plot = pg.PlotWidget(background="#0d1f2d")
+    plot.setTitle(
         f"ARK Dino Pathfinder — {len(coords)} stops · distance {total:.1f}",
-        color="cyan",
-        fontsize=13,
-        pad=10,
+        color="#00ccdd", size="12pt",
     )
-    ax.tick_params(colors="#aaccdd")
-    for spine in ax.spines.values():
-        spine.set_edgecolor("#1a3a4a")
-    legend = ax.legend(facecolor="#0d1f2d", labelcolor="white", framealpha=0.5, loc="upper right")
-    legend.set_visible(False)
 
-    def _toggle_overlays(event):
-        if event.key in ("l", "L"):
-            visible = not realm_patches[0].get_visible()
-            for patch in realm_patches:
-                patch.set_visible(visible)
-            legend.set_visible(visible)
-            fig.canvas.draw_idle()
+    for name in ("bottom", "left", "top", "right"):
+        ax = plot.getAxis(name)
+        ax.setPen(pg.mkPen("#1a3a4a"))
+        ax.setTextPen(pg.mkPen("#aaccdd"))
 
-    try:
-        plt.rcParams["keymap.yscale"].remove("l")
-    except ValueError:
-        pass
-    fig.canvas.mpl_connect("key_press_event", _toggle_overlays)
+    plot.getAxis("bottom").setLabel("Longitude (East →)")
+    plot.getAxis("left").setLabel("Latitude (South ↓)")
+    plot.showGrid(x=True, y=True, alpha=0.25)
+    plot.invertY(True)
 
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
-    print(f"\nMap saved: {output_path}")
-    print("  Tip: press L in the map window to toggle realm outlines and legend.")
-    plt.show()
+    # Left-drag pans, scroll wheel zooms — conventional map behaviour
+    plot.getViewBox().setMouseMode(pg.ViewBox.PanMode)
+
+    # Route line
+    plot.plot(lons, lats, pen=pg.mkPen("#0088cc", width=1.8))
+
+    # Waypoints
+    plot.addItem(pg.ScatterPlotItem(
+        x=lons, y=lats,
+        pen=pg.mkPen("white", width=0.5),
+        brush=pg.mkBrush(0, 204, 221, 210),
+        size=9, symbol="o", pxMode=True,
+    ))
+
+    # Start marker
+    plot.addItem(pg.ScatterPlotItem(
+        x=[lons[0]], y=[lats[0]],
+        pen=pg.mkPen("white", width=1),
+        brush=pg.mkBrush("#00ff88"),
+        size=16, symbol="star", pxMode=True,
+    ))
+
+    # Step labels
+    for step, (lat, lon) in enumerate(zip(lats, lons)):
+        idx = step % 4
+        label = pg.TextItem(
+            text=f"{step + 1}: {lat:.2f}, {lon:.2f}",
+            color=(255, 255, 255),
+            fill=pg.mkBrush(13, 31, 45, 180),
+            anchor=_ANCHORS[idx],
+        )
+        label.setPos(lon + _OX[idx], lat)
+        plot.addItem(label)
+
+    # Realm overlays (hidden by default, toggled by the Realms button)
+    realm_items = []
+    for realm in _REALMS:
+        corners = realm["corners"] + [realm["corners"][0]]   # close polygon
+        rx = [lon for _lat, lon in corners]
+        ry = [lat for lat, _lon in corners]
+        item = plot.plot(
+            rx, ry,
+            pen=pg.mkPen(realm["color"], width=1.5, style=Qt.PenStyle.DashLine),
+            name=realm["label"],
+        )
+        item.setVisible(False)
+        realm_items.append(item)
+
+    # Fit view to waypoints
+    plot.setXRange(min(lons) - _PADDING, max(lons) + _PADDING, padding=0)
+    plot.setYRange(min(lats) - _PADDING, max(lats) + _PADDING, padding=0)
+
+    def toggle_realms() -> None:
+        visible = not realm_items[0].isVisible()
+        for item in realm_items:
+            item.setVisible(visible)
+
+    return plot, toggle_realms
