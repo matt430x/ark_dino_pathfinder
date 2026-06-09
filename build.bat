@@ -59,6 +59,6 @@ if errorlevel 1 (
 echo.
 echo ============================================
 echo  Build complete!
-echo  Installer: installer_output\ARKDinoPathfinder_Setup_v1.4.exe
+echo  Installer: installer_output\ARKDinoPathfinder_Setup_v2.0.exe
 echo ============================================
 pause

@@ -7,11 +7,11 @@ _datas = [(str(_models_dir), "easyocr_models")] if os.path.isdir(_models_dir) el
 
 
 a = Analysis(
-    ['gui.py'],
+    ['gui_v2.py'],
     pathex=[],
     binaries=[],
     datas=_datas,
-    hiddenimports=['easyocr', 'matplotlib.backends.backend_tkagg'],
+    hiddenimports=['easyocr', 'pyqtgraph', 'PyQt6.QtSvg'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

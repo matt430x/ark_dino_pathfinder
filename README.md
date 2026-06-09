@@ -1,9 +1,7 @@
 # ARK Dino Pathfinder
-**by matt430**
+**by matt430** · v2.0
 
-A tool for ARK: Survival Evolved / Ascended players that reads your Dino Scanner screenshots, extracts all the coordinates automatically using OCR, solves the optimal visit route, and displays it on an interactive map — so you never waste time backtracking across the map again.
-
-<img width="885" height="883" alt="route_map" src="https://github.com/user-attachments/assets/2b722552-f00f-45ea-a831-902d242cc9ea" />
+A tool for ARK: Survival Evolved players that reads your Dino Scanner screenshots, extracts all GPS coordinates automatically using OCR, solves the optimal visit route, and displays it on an interactive embedded map — so you never waste time backtracking across the map again.
 
 ---
 
@@ -12,13 +10,15 @@ A tool for ARK: Survival Evolved / Ascended players that reads your Dino Scanner
 - Automatically reads Lat/Long coordinates from Dino Scanner screenshots using OCR
 - Deduplicates coordinates across multiple screenshots
 - Solves the shortest possible route using a nearest-neighbor + 2-opt TSP algorithm
-- Renders an interactive route map with labeled waypoints
-- Shows Fjordur's three special realms (Asgard, Jotunheim, Vanaheim) as overlays
-- Grid lines every 10 units for easy coordinate reading
-- Press **L** to toggle realm outlines and legend on/off
-- Pan and zoom the map interactively
-- Saves the map as a PNG file
-- Simple GUI — add screenshots by file picker or paste directly from clipboard
+- Embedded interactive map panel — no separate window needed
+- Smart label placement with leader lines — every waypoint is labeled, overlapping labels are automatically pushed apart
+- Shows Fjordur's three special realms (Asgard, Jotunheim, Vanaheim) as toggleable overlays
+- Grid lines for easy coordinate reading
+- Pan (left-drag), zoom (scroll wheel), and toolbar buttons for zoom in/out and reset view
+- Download the map as a PNG, or pop it out into a separate interactive window
+- All dependencies bundled — no internet connection required after install
+- Add screenshots by file picker, drag-and-drop, or paste directly from clipboard (Ctrl+V)
+- Check for updates and apply them in one click — no manual downloading
 
 ---
 
@@ -26,26 +26,21 @@ A tool for ARK: Survival Evolved / Ascended players that reads your Dino Scanner
 
 ### Step 1 — Download
 
-Go to the [Releases](../../releases) page and download the latest dist.zip.
+Go to the [Releases](../../releases) page and download the latest `ARKDinoPathfinder_Setup_vX.X.exe`.
 
-### Step 2 — Extract
+### Step 2 — Run the installer
 
-Right-click the zip → **Extract All** → choose where you want the program to live (e.g. `C:\Programs\ARK Dino Pathfinder\`).
+Double-click the `.exe` and follow the setup wizard. The program installs to your user folder — no administrator password required.
 
-Do not move `gui.exe` out of its folder — it needs all the files next to it to run.
+> **Windows SmartScreen warning:** Windows may show a "Windows protected your PC" popup the first time you run the installer. This is normal for unsigned apps.
+> 1. Click **"More info"** → **"Run anyway"**
+> 2. If that option isn't available: right-click the installer → **Properties** → check **"Unblock"** → OK, then try again
 
 ### Step 3 — Run
 
-Double-click `gui.exe` inside the extracted folder.
+Launch **ARK Dino Pathfinder** from the Start Menu or desktop shortcut.
 
-> **Windows SmartScreen warning:** Windows may show a "Windows protected your PC" popup the first time you run it. This is normal for unsigned apps. Try these options in order:
-> 1. Click **"More info"** → **"Run anyway"**
-> 2. Right-click `gui.exe` → **Run as administrator**
-> 3. Right-click `gui.exe` → **Properties** → check **"Unblock"** at the bottom → click OK, then try again
-
-### Step 4 — First launch (internet required)
-
-On the very first run, the OCR engine will automatically download its language model (~100 MB). This only happens once. Make sure you have an internet connection for the first launch.
+All dependencies (including the OCR engine and language models) are fully bundled — no additional downloads happen on first launch.
 
 ---
 
@@ -55,45 +50,49 @@ On the very first run, the OCR engine will automatically download its language m
 
 In ARK, open the Dino Scanner and let it populate the list of nearby creatures. Take a screenshot (`Win + PrintScreen` or your preferred method) for each page of results. The tool reads the **Lat.** and **Long.** columns from the scanner table.
 
+Your screenshot should look like this:
+
+<img width="1018" height="794" alt="dino scanner screenshot example" src="https://github.com/user-attachments/assets/7cf02798-2465-466e-9bd1-d89cd2038758" />
+
 ### 2. Add your screenshots
 
-You have two options:
+You have three options — mix and match freely:
 
 **Option A — File picker**
-Click **Add Files** and select one or more screenshot images (PNG, JPG, BMP, TIFF supported). You can add screenshots from multiple scans and the tool will deduplicate any overlapping coordinates automatically.
+Click **Add Files** and select one or more screenshot images (PNG, JPG, BMP, TIFF supported).
 
-**Option B — Paste from clipboard**
-Take a screenshot and copy it to your clipboard (`Win + Shift + S`, then copy, or use your screenshot tool). Click anywhere inside the screenshots box, then press **Ctrl+V**. The pasted image will be added as `pasted_1.png`, `pasted_2.png`, etc.
+**Option B — Drag and drop**
+Drag image files from Explorer directly onto the app window. They will be added instantly.
 
-You can mix both methods freely.
+**Option C — Paste from clipboard**
+Take a screenshot and copy it to your clipboard (`Win + Shift + S`, then copy, or use your screenshot tool). Click anywhere inside the screenshots list, then press **Ctrl+V**. The pasted image is added as `pasted_1.png`, `pasted_2.png`, etc.
 
-Your screenshot should look like this:
-<img width="1018" height="794" alt="s1" src="https://github.com/user-attachments/assets/7cf02798-2465-466e-9bd1-d89cd2038758" />
+You can add screenshots from multiple scans — duplicate coordinates are automatically removed.
 
-### 3. Set your output path (optional)
+### 3. Click Run
 
-The map is saved as `route_map.png` by default. Click **Browse** to choose a different save location and filename.
-
-### 4. Click Run
-
-Hit the **Run** button. The log panel will show live progress:
-- OCR scanning each screenshot
+Hit the **Run** button. The log panel shows live progress:
+- OCR engine loading
+- Scanning each screenshot
 - Coordinates found
 - Optimal route steps in order
 
-Once complete, the route map opens in a new window and is saved to your output path.
+Once complete, the interactive map appears in the right panel.
 
-### 5. Follow the route
+The OCR engine is automatically unloaded after each run to free up GPU/CPU memory while you play.
+
+### 4. Read the map
 
 The map shows:
 - A **green star** marking your starting point (step 1)
 - **Cyan dots** for each waypoint
 - A **blue line** connecting them in optimal order
 - Each waypoint labeled with its step number and exact coordinates
+- **Leader lines** connecting each label to its waypoint when labels would otherwise overlap
 
-Follow the steps in order from the log or map for the shortest possible route.
+Follow the steps in order (also listed in the log) for the shortest possible route.
 
-> **Note on verticality:** The Dino Scanner only provides Lat/Long coordinates — it has no concept of altitude. If you arrive at a waypoint and the dino isn't there, it has either been killed by something else or it is above or below you (inside a cave, on a cliff, underwater, etc.). Look up and down before moving on.
+> **Note on verticality:** The Dino Scanner only provides Lat/Long — it has no altitude. If you arrive at a waypoint and the dino isn't there, check above and below you (caves, cliffs, underwater, etc.).
 
 ---
 
@@ -101,67 +100,89 @@ Follow the steps in order from the log or map for the shortest possible route.
 
 | Action | How |
 |---|---|
-| Pan | Click the four-arrow icon in the toolbar, then click and drag |
-| Reset view | Click the house icon in the toolbar |
-| Toggle realm overlays + legend | Press **L** on your keyboard |
+| Pan | Left-click and drag |
+| Zoom | Scroll wheel |
+| Zoom in / out | **+** / **−** buttons in the map toolbar |
+| Toggle realm overlays | **◈** button in the map toolbar |
+| Reset view | **⟳** button in the map toolbar |
+| Download map as PNG | **↓ Download Map** button (bottom right) |
+| Open map in a separate window | **⧉ Open in Window** button (bottom right) |
+
+The "Open in Window" button opens a fully interactive copy of the map in its own resizable window. You can open as many copies as you like and interact with each one independently.
 
 ---
 
-## Realm Overlays
+## Realm Overlays (Fjordur)
 
-Fjordur has three special sub-realms. The map shows their approximate boundaries:
+Fjordur has three special sub-realms. Enable them with the **◈** button in the map toolbar:
 
 | Realm | Color |
 |---|---|
-| Asgard | Red |
-| Jotunheim | Blue |
-| Vanaheim | Green |
+| Asgard | Red (dashed) |
+| Jotunheim | Blue (dashed) |
+| Vanaheim | Green (dashed) |
 
-Press **L** to hide/show these overlays if they clutter your view.
-
-> **Note:** The boundaries shown on the map are NOT exact. They may extend further outward or inward in some areas. The exact boundaries of the three sub-realms are extremely difficult to measure, so they have been approximated by going as far out into the corners as possible.
+> **Note:** The boundaries shown are approximations. The exact edges of each sub-realm are difficult to measure and may vary slightly in-game.
 
 ---
 
 ## Supported Maps
 
-The coordinate extraction and route solver will work on any ARK map — only the realm overlays are Fjordur-specific.
+The coordinate extraction and route solver work on any ARK map. The realm overlays are Fjordur-specific and have no effect on other maps.
 
 ---
 
 ## Troubleshooting
 
 **No coordinates found**
-- Make sure your screenshot clearly shows the Dino Scanner table with the **Lat.** and **Long.** column headers visible
-- Avoid cropping out the headers
+- Make sure your screenshot clearly shows the Dino Scanner table with the **Lat.** and **Long.** column headers visible — don't crop them out
 - Try taking a higher resolution screenshot
 
 **Some coordinates are missing**
-- The OCR engine can occasionally misread blurry or small text — take screenshots at a higher resolution or zoom in on the scanner table before screenshotting
-- If your scanner shows multiple pages, screenshot each page separately and add them all
+- The OCR engine can occasionally misread blurry or small text — try screenshotting at higher resolution or zooming in on the scanner before screenshotting
+- If your scanner spans multiple pages, screenshot each page separately and add them all
 
-**The map window doesn't open**
-- Check the log panel for any error messages
-- Make sure you have not moved `gui.exe` out of its folder
+**Slow first run after launch**
+- The OCR engine loads into memory the first time you click Run after opening the app. Subsequent runs in the same session are faster. The engine is unloaded after each run to keep memory free.
 
-**Slow first run**
-- The first time you click Run after launching, the OCR engine loads into memory. Subsequent runs in the same session are much faster.
-
-**Windows blocked the app with no "Run anyway" option**
-- Right-click `gui.exe` → **Properties** → check **"Unblock"** at the bottom → OK
-- Or open PowerShell and run: `Unblock-File -Path "C:\path\to\gui.exe"`
+**Windows blocked the installer with no "Run anyway" option**
+- Right-click the installer → **Properties** → check **"Unblock"** → OK
+- Or open PowerShell: `Unblock-File -Path "C:\path\to\ARKDinoPathfinder_Setup_vX.X.exe"`
 
 ---
 
 ## Updating
 
-Click the **Check for Updates** button in the bottom left of the app. It will check GitHub for the latest release and compare it against your current version (shown in the top right corner).
+Click **Check for Updates** in the bottom left of the app. It checks GitHub for the latest release and compares it to your installed version (shown in the top right).
 
-- If you're up to date, it will say so in the log
-- If an update is available, it will download it automatically and the button will turn green and say **Relaunch to Update**
-- Click **Relaunch to Update** — the app will close and reopen with the new version applied automatically
+- If you're up to date, the log will say so
+- If an update is available, it downloads the new installer automatically — the button turns green and reads **Relaunch to Update**
+- Click **Relaunch to Update** — the app closes and the new installer runs silently. The app relaunches automatically when done
 
 An internet connection is required to check for and download updates.
+
+---
+
+## Building from Source
+
+Requirements: Python 3.11+, the packages in `requirements.txt`, and [Inno Setup 6](https://jrsoftware.org/isinfo.php).
+
+```powershell
+# Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run in dev mode
+python gui_v2.py
+
+# Build the installer (downloads OCR models if needed, then builds exe + installer)
+build.bat
+```
+
+The installer is written to `installer_output\ARKDinoPathfinder_Setup_v2.0.exe`.
 
 ---
 
@@ -171,6 +192,7 @@ Built by **matt430**
 
 Uses:
 - [EasyOCR](https://github.com/JaidedAI/EasyOCR) for coordinate extraction
-- [matplotlib](https://matplotlib.org/) for map rendering
-- [customtkinter](https://github.com/TomSchimansky/CustomTkinter) for the GUI
+- [PyQtGraph](https://www.pyqtgraph.org/) for interactive map rendering
+- [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) for the GUI
 - [scipy](https://scipy.org/) for the TSP route solver
+- [Pillow](https://python-pillow.org/) for image handling
