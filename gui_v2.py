@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QEvent
 from PyQt6.QtGui import QColor, QPalette, QPainter, QBrush
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QLabel, QPushButton, QListWidget, QLineEdit, QTextEdit,
+    QSplitter, QLabel, QPushButton, QListWidget, QTextEdit,
     QProgressBar, QFileDialog, QFrame, QSizePolicy,
 )
 
@@ -315,6 +315,9 @@ class App(QMainWindow):
         self._pipeline: PipelineWorker | None = None
         self._update_worker: UpdateWorker | None = None
         self._dl_worker: DownloadWorker | None = None
+        self._coords: list | None = None
+        self._route: list | None = None
+        self._map_windows: list = []   # keep references so windows aren't GC'd
 
         self.setAcceptDrops(True)
         self._cleanup_old_files()
@@ -396,23 +399,6 @@ class App(QMainWindow):
         self._file_list.installEventFilter(self)
         sc_lay.addWidget(self._file_list)
         lay.addWidget(sc)
-
-        # Output card
-        oc = Card()
-        oc_lay = QHBoxLayout(oc)
-        oc_lay.setContentsMargins(10, 8, 10, 8)
-        oc_lay.setSpacing(6)
-        out_lbl = QLabel("Output")
-        out_lbl.setStyleSheet("font-weight: bold;")
-        out_lbl.setFixedWidth(46)
-        self._out_edit = QLineEdit("route_map.png")
-        br_btn = QPushButton("Browse")
-        br_btn.setFixedHeight(26)
-        br_btn.clicked.connect(self._browse_output)
-        oc_lay.addWidget(out_lbl)
-        oc_lay.addWidget(self._out_edit)
-        oc_lay.addWidget(br_btn)
-        lay.addWidget(oc)
 
         # Run button
         self._run_btn = QPushButton("▶   Run")
@@ -501,9 +487,14 @@ class App(QMainWindow):
         mc_lay.addWidget(self._map_container, 1)
         lay.addWidget(mc, 1)
 
-        # Download row
+        # Download / open row
         dl_row = QHBoxLayout()
         dl_row.addStretch()
+        self._open_btn = QPushButton("⧉   Open in Window")
+        self._open_btn.setFixedHeight(32)
+        self._open_btn.setEnabled(False)
+        self._open_btn.clicked.connect(self._open_in_window)
+        dl_row.addWidget(self._open_btn)
         self._dl_btn = QPushButton("↓   Download Map")
         self._dl_btn.setFixedHeight(32)
         self._dl_btn.setEnabled(False)
@@ -551,6 +542,21 @@ class App(QMainWindow):
     def _reset_view(self):
         if isinstance(self._plot_widget, pg.PlotWidget):
             self._plot_widget.autoRange()
+
+    def _open_in_window(self):
+        if self._coords is None or self._route is None:
+            return
+        from visualize import plot_route
+        plot_widget, _ = plot_route(self._coords, self._route)
+        win = QMainWindow(self)
+        win.setWindowTitle("ARK Dino Pathfinder — Map")
+        win.resize(1000, 750)
+        win.setCentralWidget(plot_widget)
+        win.setStyleSheet(_QSS)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        win.destroyed.connect(lambda: self._map_windows.remove(win) if win in self._map_windows else None)
+        self._map_windows.append(win)
+        win.show()
 
     def _download_map(self):
         if not isinstance(self._plot_widget, pg.PlotWidget):
@@ -640,13 +646,6 @@ class App(QMainWindow):
         for p in self._selected_files:
             self._file_list.addItem(Path(p).name)
 
-    def _browse_output(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Save route map", "route_map.png", "PNG Image (*.png)"
-        )
-        if path:
-            self._out_edit.setText(path)
-
     # ── Log ───────────────────────────────────────────────────────────────────
 
     def _log_append(self, text: str):
@@ -694,8 +693,11 @@ class App(QMainWindow):
         self._set_plot_widget(plot_widget)
         self._set_map_btns_enabled(True)
         self._dl_btn.setEnabled(True)
+        self._open_btn.setEnabled(True)
         self._progress.hide()
         self._run_btn.setEnabled(True)
+        self._coords = coords
+        self._route = route
 
     def _on_pipeline_error(self, msg: str):
         self._log_append(f"\nError: {msg}\n")
