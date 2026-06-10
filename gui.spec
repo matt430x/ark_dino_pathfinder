@@ -7,7 +7,7 @@ _datas = [(str(_models_dir), "easyocr_models")] if os.path.isdir(_models_dir) el
 
 
 a = Analysis(
-    ['gui_v2.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
     datas=_datas,

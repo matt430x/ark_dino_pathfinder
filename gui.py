@@ -1,423 +1,927 @@
-"""ARK Dino Pathfinder — GUI entry point (customtkinter)."""
+"""ARK Dino Pathfinder v2.0 — PyQt6 GUI."""
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
-import threading
 import urllib.request
-import zipfile
 from pathlib import Path
-from tkinter import filedialog
 
-import customtkinter as ctk
+import pyqtgraph as pg
+pg.setConfigOptions(antialias=True)
 
-from extract import extract_coordinates, unload_reader
-from route import solve_tsp
-from visualize import plot_route
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QEvent
+from PyQt6.QtGui import QColor, QPalette, QPainter, QBrush
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QSplitter, QLabel, QPushButton, QListWidget, QTextEdit,
+    QProgressBar, QFileDialog, QFrame, QSizePolicy, QMessageBox,
+)
 
-VERSION = "1.4"
+VERSION = "2.1"
 _GITHUB_API = "https://api.github.com/repos/matt430x/ark_dino_pathfinder/releases/latest"
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+# ── Colour tokens ─────────────────────────────────────────────────────────────
+BG    = "#0d1f2d"
+CARD  = "#102030"
+ACCENT= "#00ccdd"
+TEXT  = "#aaccdd"
+DIM   = "#445566"
+BTN2  = "#1a3a4a"
+HOVER = "#2a4a5a"
+
+# ── Global stylesheet ─────────────────────────────────────────────────────────
+_QSS = f"""
+QWidget {{
+    background-color: {BG};
+    color: {TEXT};
+    font-family: "Segoe UI";
+    font-size: 11px;
+}}
+QLabel {{ background-color: transparent; }}
+
+QPushButton {{
+    background-color: {BTN2};
+    color: {TEXT};
+    border: none;
+    border-radius: 4px;
+    padding: 5px 12px;
+}}
+QPushButton:hover    {{ background-color: {HOVER}; }}
+QPushButton:pressed  {{ background-color: {BTN2}; }}
+QPushButton:disabled {{ background-color: #0f2535; color: #334455; }}
+
+QPushButton#accent {{
+    background-color: {ACCENT};
+    color: {BG};
+    font-weight: bold;
+    font-size: 13px;
+    padding: 8px 12px;
+}}
+QPushButton#accent:hover    {{ background-color: #22ddef; }}
+QPushButton#accent:disabled {{ background-color: #005566; color: #334455; }}
+
+QPushButton#update-ready {{
+    background-color: #1a5c1a;
+    color: {TEXT};
+}}
+QPushButton#update-ready:hover {{ background-color: #237023; }}
+
+QListWidget {{
+    background-color: {BG};
+    border: 1px solid {BTN2};
+    border-radius: 4px;
+    outline: none;
+}}
+QListWidget::item           {{ padding: 3px 6px; }}
+QListWidget::item:selected  {{ background-color: {BTN2}; color: {ACCENT}; }}
+QListWidget::item:hover     {{ background-color: #0f2535; }}
+
+QTextEdit {{
+    background-color: {BG};
+    border: 1px solid {BTN2};
+    border-radius: 4px;
+    color: {TEXT};
+    font-family: "Consolas";
+    font-size: 10px;
+    padding: 4px;
+}}
+
+QLineEdit {{
+    background-color: {BG};
+    border: 1px solid {BTN2};
+    border-radius: 4px;
+    color: {TEXT};
+    padding: 4px 8px;
+    selection-background-color: {ACCENT};
+    selection-color: {BG};
+}}
+QLineEdit:focus {{ border-color: {ACCENT}; }}
+
+QProgressBar {{
+    background-color: {BG};
+    border: 1px solid {BTN2};
+    border-radius: 3px;
+    max-height: 8px;
+}}
+QProgressBar::chunk {{ background-color: {ACCENT}; border-radius: 3px; }}
+
+QSplitter::handle:horizontal {{
+    background-color: {BTN2};
+    width: 2px;
+}}
+
+QScrollBar:vertical {{
+    background-color: transparent;
+    width: 8px;
+    margin: 0px;
+}}
+QScrollBar::handle:vertical {{
+    background-color: {BTN2};
+    border-radius: 4px;
+    min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover   {{ background-color: {HOVER}; }}
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical       {{ height: 0px; }}
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical       {{ background: none; }}
+
+QScrollBar:horizontal {{
+    background-color: transparent;
+    height: 8px;
+    margin: 0px;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {BTN2};
+    border-radius: 4px;
+    min-width: 24px;
+}}
+QScrollBar::handle:horizontal:hover {{ background-color: {HOVER}; }}
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal     {{ width: 0px; }}
+QScrollBar::add-page:horizontal,
+QScrollBar::sub-page:horizontal     {{ background: none; }}
+"""
+
+_MAP_BTN_QSS = f"""
+QPushButton {{
+    background-color: #152535;
+    color: {TEXT};
+    font-size: 14px;
+    border: 1px solid {BTN2};
+    border-radius: 4px;
+    padding: 0px;
+}}
+QPushButton:hover   {{ background-color: {BTN2}; color: {ACCENT}; }}
+QPushButton:checked {{ background-color: {BTN2}; color: {ACCENT}; border-color: {ACCENT}; }}
+QPushButton:disabled {{ color: #334455; border-color: #0f2535; }}
+"""
 
 
-class App(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        self.title("ARK Dino Pathfinder")
-        self.geometry("640x700")
-        self.resizable(False, False)
-        self.configure(fg_color="#0d1f2d")
-        self._selected_files: list[str] = []
-        self._paste_dir = tempfile.mkdtemp()
-        self._paste_count = 0
-        self._cleanup_old_files()
-        self._build_ui()
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-    def _cleanup_old_files(self):
-        """Remove leftover temp files from a previous update."""
-        if not getattr(sys, "frozen", False):
-            return
-        app_dir = Path(sys.executable).parent
-        for leftover in app_dir.glob("gui.exe.old"):
-            try:
-                leftover.unlink()
-            except Exception:
-                pass
+def _ver(v: str) -> tuple:
+    return tuple(int(x) for x in v.split("."))
 
-    def _build_ui(self):
-        ctk.CTkLabel(
-            self, text="ARK Dino Pathfinder",
-            font=("Arial", 22, "bold"), text_color="cyan",
-        ).pack(pady=(20, 2))
-        ctk.CTkLabel(
-            self, text="by matt430",
-            font=("Arial", 11), text_color="#aaccdd",
-        ).pack(pady=(0, 8))
-        ctk.CTkLabel(
-            self, text=f"v{VERSION}",
-            font=("Arial", 11), text_color="#445566",
-        ).place(relx=1.0, x=-20, y=20, anchor="ne")
 
-        # ── file selection ────────────────────────────────────────────────
-        file_frame = ctk.CTkFrame(self, fg_color="#102030", corner_radius=8)
-        file_frame.pack(fill="x", padx=20, pady=8)
+class _Redirect:
+    def __init__(self, fn):
+        self._fn = fn
+    def write(self, text: str):
+        if text:
+            self._fn(text)
+    def flush(self):
+        pass
 
-        btn_row = ctk.CTkFrame(file_frame, fg_color="transparent")
-        btn_row.pack(fill="x", padx=12, pady=(10, 4))
-        ctk.CTkLabel(btn_row, text="Screenshots", text_color="#aaccdd",
-                     font=("Arial", 13)).pack(side="left")
-        ctk.CTkButton(btn_row, text="Clear", width=70,
-                      fg_color="#1a3a4a", hover_color="#2a4a5a",
-                      command=self._clear_files).pack(side="right", padx=(4, 0))
-        ctk.CTkButton(btn_row, text="Add Files", width=90,
-                      command=self._add_files).pack(side="right")
 
-        self._file_box = ctk.CTkTextbox(
-            file_frame, height=110,
-            fg_color="#0d1f2d", text_color="#aaccdd",
-            state="disabled",
-        )
-        self._file_box.pack(fill="x", padx=12, pady=(0, 10))
-        self._file_box.bind("<Button-1>", lambda e: self._file_box.focus_set())
-        self._file_box.bind("<Control-v>", self._paste_image)
+# ── Workers ───────────────────────────────────────────────────────────────────
 
-        # ── output path ───────────────────────────────────────────────────
-        out_frame = ctk.CTkFrame(self, fg_color="#102030", corner_radius=8)
-        out_frame.pack(fill="x", padx=20, pady=(0, 8))
+class PipelineWorker(QThread):
+    log_message  = pyqtSignal(str)
+    progress_set = pyqtSignal(float)        # –1 = indeterminate, 0–1 = determinate
+    finished_ok  = pyqtSignal(list, list)   # coords, route  (plain data — no Qt objects)
+    finished_err = pyqtSignal(str)
 
-        ctk.CTkLabel(out_frame, text="Output", text_color="#aaccdd",
-                     font=("Arial", 13)).pack(side="left", padx=12, pady=10)
-        self._out_var = ctk.StringVar(value="route_map.png")
-        ctk.CTkEntry(out_frame, textvariable=self._out_var,
-                     fg_color="#0d1f2d", text_color="white").pack(
-            side="left", fill="x", expand=True, pady=10)
-        ctk.CTkButton(out_frame, text="Browse", width=80,
-                      command=self._browse_output).pack(side="right", padx=12, pady=10)
+    def __init__(self, files: list, parent=None):
+        super().__init__(parent)
+        self._files = files
 
-        # ── run button ────────────────────────────────────────────────────
-        self._run_btn = ctk.CTkButton(
-            self, text="Run", height=42,
-            font=("Arial", 15, "bold"),
-            command=self._run,
-        )
-        self._run_btn.pack(padx=20, pady=(0, 8), fill="x")
-
-        # ── progress bar (hidden until screenshot processing) ────────────
-        self._progress = ctk.CTkProgressBar(self, height=12)
-        # not packed yet — shown dynamically during pipeline
-
-        # ── log header (label left, spinner right) ────────────────────────
-        self._log_header = ctk.CTkFrame(self, fg_color="transparent")
-        self._log_header.pack(fill="x", padx=20)
-        ctk.CTkLabel(self._log_header, text="Log", text_color="#aaccdd",
-                     font=("Arial", 13)).pack(side="left")
-        self._spinner_lbl = ctk.CTkLabel(self._log_header, text="",
-                                         font=("Arial", 14), text_color="cyan")
-        self._spinner_lbl.pack(side="right")
-        self._log = ctk.CTkTextbox(
-            self, fg_color="#0d1f2d", text_color="#aaccdd", state="disabled",
-        )
-        self._log.pack(fill="both", expand=True, padx=20, pady=(4, 8))
-
-        # ── bottom bar ────────────────────────────────────────────────────
-        bottom = ctk.CTkFrame(self, fg_color="transparent")
-        bottom.pack(fill="x", padx=20, pady=(0, 12))
-        self._update_btn = ctk.CTkButton(
-            bottom, text="Check for Updates", width=150,
-            fg_color="#1a3a4a", hover_color="#2a4a5a",
-            font=("Arial", 11),
-            command=self._check_for_updates,
-        )
-        self._update_btn.pack(side="left", padx=(8, 0))
-
-    # ── file helpers ──────────────────────────────────────────────────────
-
-    def _add_files(self):
-        paths = filedialog.askopenfilenames(
-            title="Select Dino Scanner screenshots",
-            filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp *.tiff"), ("All files", "*.*")],
-        )
-        for p in paths:
-            if p not in self._selected_files:
-                self._selected_files.append(p)
-        self._refresh_file_box()
-
-    def _paste_image(self, event=None):
-        from PIL import ImageGrab
+    def run(self):
+        from extract import unload_reader
+        old_stdout = sys.stdout
+        sys.stdout = _Redirect(self.log_message.emit)
         try:
-            img = ImageGrab.grabclipboard()
-        except Exception:
-            return "break"
-        if img is None:
-            return "break"
-        self._paste_count += 1
-        path = str(Path(self._paste_dir) / f"pasted_{self._paste_count}.png")
-        img.save(path, "PNG")
-        if path not in self._selected_files:
-            self._selected_files.append(path)
-        self._refresh_file_box()
-        return "break"
+            from extract import _get_reader, extract_coordinates
+            from route import solve_tsp
 
-    def _clear_files(self):
-        self._selected_files.clear()
-        self._refresh_file_box()
+            self.log_message.emit("Loading OCR engine...\n")
+            self.progress_set.emit(-1.0)
+            _get_reader()
 
-    def _refresh_file_box(self):
-        self._file_box.configure(state="normal")
-        self._file_box.delete("1.0", "end")
-        for p in self._selected_files:
-            self._file_box.insert("end", Path(p).name + "\n")
-        self._file_box.configure(state="disabled")
+            def on_progress(current, total):
+                self.progress_set.emit(current / total)
 
-    def _browse_output(self):
-        path = filedialog.asksaveasfilename(
-            defaultextension=".png",
-            filetypes=[("PNG image", "*.png")],
-            initialfile="route_map.png",
-        )
-        if path:
-            self._out_var.set(path)
+            coords = extract_coordinates(self._files, progress_callback=on_progress)
 
-    # ── log helpers ───────────────────────────────────────────────────────
+            if not coords:
+                self.log_message.emit("\nNo coordinates found.\n")
+                self.finished_err.emit("No coordinates found.")
+                return
 
-    def _log_write(self, text: str):
-        self.after(0, self._log_append, text)
+            route = solve_tsp(coords)
+            total_dist = sum(
+                ((coords[route[i]][0] - coords[route[i - 1]][0]) ** 2 +
+                 (coords[route[i]][1] - coords[route[i - 1]][1]) ** 2) ** 0.5
+                for i in range(1, len(route))
+            )
+            self.log_message.emit(
+                f"\nOptimal route — {len(coords)} stops, distance {total_dist:.1f}\n"
+            )
+            for step, idx in enumerate(route, 1):
+                lat, lon = coords[idx]
+                self.log_message.emit(f"  Step {step:3d}:  Lat {lat:6.2f}  Long {lon:6.2f}\n")
 
-    def _log_append(self, text: str):
-        self._log.configure(state="normal")
-        self._log.insert("end", text)
-        self._log.see("end")
-        self._log.configure(state="disabled")
+            # Emit raw data only — PlotWidget must be created on the main thread
+            self.finished_ok.emit(coords, route)
 
-    # ── spinner helpers (main thread only) ───────────────────────────────
+        except Exception as exc:
+            import traceback
+            self.finished_err.emit(str(exc) + "\n" + traceback.format_exc())
+        finally:
+            sys.stdout = old_stdout
+            unload_reader()
+            self.log_message.emit("OCR engine unloaded.\n")
 
-    _SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-    _spinner_idx = 0
-    _spinner_running = False
 
-    def _spinner_start(self):
-        self._spinner_running = True
-        self._spinner_idx = 0
-        self._animate_spinner()
+class UpdateWorker(QThread):
+    up_to_date   = pyqtSignal()
+    update_found = pyqtSignal(str, str)   # tag, download_url
+    error        = pyqtSignal(str)
 
-    def _spinner_stop(self):
-        self._spinner_running = False
-        self._spinner_lbl.configure(text="")
-
-    def _animate_spinner(self):
-        if not self._spinner_running:
-            return
-        self._spinner_lbl.configure(
-            text=self._SPINNER_FRAMES[self._spinner_idx % len(self._SPINNER_FRAMES)]
-        )
-        self._spinner_idx += 1
-        self.after(100, self._animate_spinner)
-
-    # ── progress bar helpers (main thread only) ───────────────────────────
-
-    def _progress_show_determinate(self):
-        self._progress.configure(mode="determinate")
-        self._progress.set(0)
-        self._progress.pack(padx=20, pady=(0, 4), fill="x", before=self._log_header)
-
-    def _progress_set(self, value: float):
-        self._progress.set(value)
-
-    def _progress_hide(self):
-        self._progress.pack_forget()
-
-    # ── update ────────────────────────────────────────────────────────────
-
-    def _check_for_updates(self):
-        self._update_btn.configure(state="disabled", text="Checking...")
-        threading.Thread(target=self._do_check, daemon=True).start()
-
-    def _do_check(self):
+    def run(self):
         try:
             req = urllib.request.Request(
                 _GITHUB_API, headers={"User-Agent": "ark-dino-pathfinder"}
             )
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read())
-
             tag = data["tag_name"].lstrip("v")
-
-            def ver(v):
-                return tuple(int(x) for x in v.split("."))
-
-            if ver(tag) <= ver(VERSION):
-                self.after(0, lambda: self._on_up_to_date())
+            if _ver(tag) <= _ver(VERSION):
+                self.up_to_date.emit()
                 return
-
-            download_url = next(
+            url = next(
                 (a["browser_download_url"] for a in data.get("assets", [])
-                 if a["name"].endswith(".zip")),
+                 if a["name"].lower().endswith(".exe")),
                 None,
             )
-            if not download_url:
-                self.after(0, lambda: self._on_update_error("No zip asset found in release."))
+            if not url:
+                self.error.emit("No .exe installer found in release assets.")
                 return
-
-            self.after(0, lambda: self._on_update_found(tag, download_url))
-
+            self.update_found.emit(tag, url)
         except Exception as exc:
-            self.after(0, lambda: self._on_update_error(str(exc)))
+            self.error.emit(str(exc))
 
-    def _on_up_to_date(self):
-        self._log_append(f"Already up to date (v{VERSION}).\n")
-        self._update_btn.configure(state="normal", text="Check for Updates")
 
-    def _on_update_error(self, msg: str):
-        self._log_append(f"Update check failed: {msg}\n")
-        self._update_btn.configure(state="normal", text="Check for Updates")
+class DownloadWorker(QThread):
+    done  = pyqtSignal(str)
+    error = pyqtSignal(str)
 
-    def _on_update_found(self, tag: str, download_url: str):
-        self._log_append(f"Update available: v{tag} — downloading...\n")
-        self._update_btn.configure(text="Downloading...", state="disabled")
-        threading.Thread(
-            target=self._do_download, args=(tag, download_url), daemon=True
-        ).start()
+    def __init__(self, url: str, parent=None):
+        super().__init__(parent)
+        self._url = url
 
-    def _do_download(self, tag: str, download_url: str):
+    def run(self):
         try:
-            tmp_zip = tempfile.mktemp(suffix=".zip")
-            urllib.request.urlretrieve(download_url, tmp_zip)
-
-            tmp_dir = tempfile.mkdtemp()
-            with zipfile.ZipFile(tmp_zip, "r") as zf:
-                zf.extractall(tmp_dir)
-            os.unlink(tmp_zip)
-
-            src_dir = self._find_exe_dir(tmp_dir)
-            if not src_dir:
-                self.after(0, lambda: self._on_update_error(
-                    "Could not find gui.exe in downloaded update."))
-                return
-
-            self.after(0, lambda: self._on_download_complete(src_dir))
-
+            dst = tempfile.mktemp(suffix=".exe")
+            urllib.request.urlretrieve(self._url, dst)
+            self.done.emit(dst)
         except Exception as exc:
-            self.after(0, lambda: self._on_update_error(str(exc)))
+            self.error.emit(str(exc))
 
-    def _find_exe_dir(self, root: str) -> str | None:
-        for dirpath, _, files in os.walk(root):
-            if "gui.exe" in files:
-                return dirpath
-        return None
 
-    def _on_download_complete(self, src_dir: str):
-        self._log_append("Download complete! Click 'Relaunch to Update' to apply.\n")
-        self._update_btn.configure(
-            text="Relaunch to Update",
-            state="normal",
-            fg_color="#1a5c1a",
-            hover_color="#237023",
-            command=lambda: self._do_relaunch(src_dir),
-        )
+# ── Card widget ───────────────────────────────────────────────────────────────
 
-    def _do_relaunch(self, src_dir: str):
+class Card(QFrame):
+    """Rounded dark-navy panel painted directly to avoid stylesheet cascade."""
+
+    def __init__(self, parent=None, radius: int = 8):
+        super().__init__(parent)
+        self._radius = radius
+        self._color = QColor(CARD)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setBrush(QBrush(self._color))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(self.rect(), self._radius, self._radius)
+
+
+# ── Standalone map window ─────────────────────────────────────────────────────
+
+class MapWindow(QMainWindow):
+    """Popup map window opened via 'Open in Window'."""
+
+    def __init__(self, coords, route, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("ARK Dino Pathfinder — Map")
+        self.resize(1000, 750)
+        self.setStyleSheet(_QSS)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+        from visualize import plot_route
+        self._plot_widget, self._toggle_realms_fn = plot_route(coords, route)
+
+        central = QWidget()
+        self.setCentralWidget(central)
+        lay = QVBoxLayout(central)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+
+        # ── Toolbar ────────────────────────────────────────────────────────────
+        toolbar = QWidget()
+        toolbar.setFixedHeight(36)
+        toolbar.setStyleSheet(f"background-color: {CARD};")
+        tb_lay = QHBoxLayout(toolbar)
+        tb_lay.setContentsMargins(6, 4, 6, 4)
+        tb_lay.setSpacing(4)
+
+        self._btns: dict = {}
+        for sym, tip, name, checkable in [
+            ("+", "Zoom in",        "zoom_in",  False),
+            ("−", "Zoom out",       "zoom_out", False),
+            ("◈", "Realm overlays", "realms",   True),
+            ("⟳", "Reset view",     "reset",    False),
+        ]:
+            btn = QPushButton(sym)
+            btn.setFixedSize(30, 26)
+            btn.setToolTip(tip)
+            btn.setStyleSheet(_MAP_BTN_QSS)
+            btn.setCheckable(checkable)
+            self._btns[name] = btn
+            tb_lay.addWidget(btn)
+
+        tb_lay.addStretch()
+
+        self._aot_btn = QPushButton("📌")
+        self._aot_btn.setFixedSize(30, 26)
+        self._aot_btn.setToolTip("Always on top")
+        self._aot_btn.setCheckable(True)
+        self._aot_btn.setStyleSheet(_MAP_BTN_QSS)
+        tb_lay.addWidget(self._aot_btn)
+
+        lay.addWidget(toolbar)
+        lay.addWidget(self._plot_widget, 1)
+
+        self._btns["zoom_in"].clicked.connect(lambda: self._zoom(0.75))
+        self._btns["zoom_out"].clicked.connect(lambda: self._zoom(1.33))
+        self._btns["realms"].toggled.connect(lambda _: self._toggle_realms_fn())
+        self._btns["reset"].clicked.connect(self._plot_widget.autoRange)
+        self._aot_btn.toggled.connect(self._toggle_aot)
+
+    def _zoom(self, factor: float):
+        self._plot_widget.getViewBox().scaleBy((factor, factor))
+
+    def _toggle_aot(self, on: bool):
+        pos = self.pos()
+        flags = self.windowFlags()
+        if on:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        else:
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
+        self.move(pos)
+        self.show()
+
+    def _apply_overlay(self):
+        """Auto-called when the window is opened. Enables always-on-top + click-through."""
+        pos = self.pos()
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        self.move(pos)
+        self.show()   # re-creates native window; winId() must be called after this
+
+        # WS_EX_LAYERED + WS_EX_TRANSPARENT: all mouse input passes through to
+        # whatever window is underneath, so ARK receives all clicks and scrolls.
+        try:
+            import ctypes
+            _GWL_EXSTYLE       = -20
+            _WS_EX_LAYERED     = 0x00080000
+            _WS_EX_TRANSPARENT = 0x00000020
+            hwnd = int(self.winId())
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(
+                hwnd, _GWL_EXSTYLE, style | _WS_EX_LAYERED | _WS_EX_TRANSPARENT
+            )
+        except Exception:
+            pass
+
+        self.setWindowOpacity(0.6)
+        self.setWindowTitle("ARK Dino Pathfinder — Map  ▶  OVERLAY")
+        # blockSignals: _toggle_aot calls show() which re-creates the native window,
+        # which would wipe the WS_EX_TRANSPARENT style we just applied.
+        self._aot_btn.blockSignals(True)
+        self._aot_btn.setChecked(True)
+        self._aot_btn.blockSignals(False)
+        self._aot_btn.setEnabled(False)
+
+    def _remove_overlay(self):
+        try:
+            import ctypes
+            _GWL_EXSTYLE       = -20
+            _WS_EX_TRANSPARENT = 0x00000020
+            hwnd = int(self.winId())
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, _GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(
+                hwnd, _GWL_EXSTYLE, style & ~_WS_EX_TRANSPARENT
+            )
+        except Exception:
+            pass
+        self.setWindowOpacity(1.0)
+        self.setWindowTitle("ARK Dino Pathfinder — Map")
+        self._aot_btn.setEnabled(True)
+
+
+# ── Main window ───────────────────────────────────────────────────────────────
+
+class App(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ARK Dino Pathfinder")
+        self.resize(1140, 720)
+        self.setMinimumSize(820, 560)
+
+        self._selected_files: list = []
+        self._paste_dir = tempfile.mkdtemp()
+        self._paste_count = 0
+        self._plot_widget: QWidget | None = None
+        self._toggle_realms_fn = None
+        self._pipeline: PipelineWorker | None = None
+        self._update_worker: UpdateWorker | None = None
+        self._dl_worker: DownloadWorker | None = None
+        self._coords: list | None = None
+        self._route: list | None = None
+        self._map_windows: list = []   # keep references so windows aren't GC'd
+
+        self.setAcceptDrops(True)
+        self._cleanup_old_files()
+        self._build_ui()
+
+    def _cleanup_old_files(self):
         if not getattr(sys, "frozen", False):
-            self._log_append("Auto-update only works in the packaged exe.\n")
             return
+        for f in Path(sys.executable).parent.glob("*.exe.old"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
 
-        app_dir = str(Path(sys.executable).parent)
+    # ── UI construction ───────────────────────────────────────────────────────
 
-        bat_path = os.path.join(tempfile.gettempdir(), "ark_update.bat")
-        bat = (
-            "@echo off\n"
-            "timeout /t 2 /nobreak > nul\n"
-            f'robocopy "{src_dir}" "{app_dir}" /E /IS /IT /NFL /NDL /NJH /NJS /NC /NS /NP\n'
-            f'start "" "{app_dir}\\gui.exe"\n'
-            f'rmdir /s /q "{src_dir}"\n'
-            'del "%~f0"\n'
+    def _build_ui(self):
+        root = QWidget()
+        self.setCentralWidget(root)
+        outer = QHBoxLayout(root)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(0)
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(2)
+        splitter.addWidget(self._build_left())
+        splitter.addWidget(self._build_right())
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([320, 800])
+        outer.addWidget(splitter)
+
+    def _build_left(self) -> QWidget:
+        w = QWidget()
+        w.setMinimumWidth(260)
+        w.setMaximumWidth(440)
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(0, 0, 8, 0)
+        lay.setSpacing(8)
+
+        # Title
+        title = QLabel("ARK Dino Pathfinder")
+        title.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {ACCENT};")
+        sub = QLabel("by matt430")
+        sub.setStyleSheet(f"font-size: 10px; color: {TEXT};")
+        ver = QLabel(f"v{VERSION}")
+        ver.setStyleSheet(f"font-size: 10px; color: {DIM};")
+        ver.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(1)
+        title_col.addWidget(title)
+        title_col.addWidget(sub)
+        title_row = QHBoxLayout()
+        title_row.addLayout(title_col)
+        title_row.addWidget(ver, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        lay.addLayout(title_row)
+
+        # Screenshots card
+        sc = Card()
+        sc_lay = QVBoxLayout(sc)
+        sc_lay.setContentsMargins(10, 10, 10, 10)
+        sc_lay.setSpacing(6)
+        sc_hdr = QHBoxLayout()
+        sc_lbl = QLabel("Screenshots")
+        sc_lbl.setStyleSheet("font-size: 12px; font-weight: bold;")
+        add_btn = QPushButton("Add Files")
+        add_btn.setFixedHeight(26)
+        add_btn.clicked.connect(self._add_files)
+        clr_btn = QPushButton("Clear")
+        clr_btn.setFixedHeight(26)
+        clr_btn.clicked.connect(self._clear_files)
+        sc_hdr.addWidget(sc_lbl)
+        sc_hdr.addStretch()
+        sc_hdr.addWidget(add_btn)
+        sc_hdr.addWidget(clr_btn)
+        sc_lay.addLayout(sc_hdr)
+        self._file_list = QListWidget()
+        self._file_list.setFixedHeight(100)
+        self._file_list.installEventFilter(self)
+        sc_lay.addWidget(self._file_list)
+        lay.addWidget(sc)
+
+        # Run button
+        self._run_btn = QPushButton("▶   Run")
+        self._run_btn.setObjectName("accent")
+        self._run_btn.setFixedHeight(42)
+        self._run_btn.clicked.connect(self._run)
+        lay.addWidget(self._run_btn)
+
+        # Progress bar (hidden until pipeline)
+        self._progress = QProgressBar()
+        self._progress.setTextVisible(False)
+        self._progress.setFixedHeight(8)
+        self._progress.setRange(0, 100)
+        self._progress.hide()
+        lay.addWidget(self._progress)
+
+        # Log card
+        lc = Card()
+        lc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        lc_lay = QVBoxLayout(lc)
+        lc_lay.setContentsMargins(10, 8, 10, 8)
+        lc_lay.setSpacing(4)
+        log_lbl = QLabel("Log")
+        log_lbl.setStyleSheet("font-size: 12px; font-weight: bold;")
+        lc_lay.addWidget(log_lbl)
+        self._log = QTextEdit()
+        self._log.setReadOnly(True)
+        self._log.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        lc_lay.addWidget(self._log)
+        lay.addWidget(lc, 1)
+
+        # Updates button
+        self._upd_btn = QPushButton("Check for Updates")
+        self._upd_btn.setFixedHeight(28)
+        self._upd_btn.clicked.connect(self._check_for_updates)
+        lay.addWidget(self._upd_btn)
+
+        return w
+
+    def _build_right(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(8, 0, 0, 0)
+        lay.setSpacing(8)
+
+        # Map card
+        mc = Card()
+        mc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        mc_lay = QVBoxLayout(mc)
+        mc_lay.setContentsMargins(10, 10, 10, 10)
+        mc_lay.setSpacing(6)
+
+        # Card header
+        hdr = QHBoxLayout()
+        hdr.addWidget(_bold_label("Map Preview"))
+        hdr.addStretch()
+
+        # Toolbar buttons: zoom in/out, realms toggle, reset view
+        # Pan is always-on (left-drag) so no pan button needed
+        self._map_btns: dict = {}
+        for sym, tip, name, checkable in [
+            ("+", "Zoom in",    "zoom_in",  False),
+            ("−", "Zoom out",   "zoom_out", False),
+            ("◈", "Realms",     "realms",   True),
+            ("⟳", "Reset view", "reset",    False),
+        ]:
+            btn = QPushButton(sym)
+            btn.setFixedSize(30, 26)
+            btn.setToolTip(tip)
+            btn.setStyleSheet(_MAP_BTN_QSS)
+            btn.setEnabled(False)
+            btn.setCheckable(checkable)
+            self._map_btns[name] = btn
+            hdr.addWidget(btn)
+
+        mc_lay.addLayout(hdr)
+
+        # Container that holds either the placeholder or the PlotWidget
+        self._map_container = QWidget()
+        self._map_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        with open(bat_path, "w") as f:
-            f.write(bat)
+        self._map_lay = QVBoxLayout(self._map_container)
+        self._map_lay.setContentsMargins(0, 0, 0, 0)
+        self._show_placeholder()
+        mc_lay.addWidget(self._map_container, 1)
+        lay.addWidget(mc, 1)
 
-        subprocess.Popen(
-            ["cmd", "/c", bat_path],
-            creationflags=subprocess.CREATE_NO_WINDOW,
+        # Download / open row
+        dl_row = QHBoxLayout()
+        dl_row.addStretch()
+        self._popup_overlay_btn = QPushButton("🎮   Game Overlay")
+        self._popup_overlay_btn.setFixedHeight(32)
+        self._popup_overlay_btn.setCheckable(True)
+        self._popup_overlay_btn.setEnabled(False)
+        self._popup_overlay_btn.setToolTip("Toggle click-through overlay on the popup map window")
+        self._popup_overlay_btn.toggled.connect(self._toggle_popup_overlay)
+        dl_row.addWidget(self._popup_overlay_btn)
+        self._open_btn = QPushButton("⧉   Open in Window")
+        self._open_btn.setFixedHeight(32)
+        self._open_btn.setEnabled(False)
+        self._open_btn.clicked.connect(self._open_in_window)
+        dl_row.addWidget(self._open_btn)
+        self._dl_btn = QPushButton("↓   Download Map")
+        self._dl_btn.setFixedHeight(32)
+        self._dl_btn.setEnabled(False)
+        self._dl_btn.clicked.connect(self._download_map)
+        dl_row.addWidget(self._dl_btn)
+        lay.addLayout(dl_row)
+
+        self._map_btns["zoom_in"].clicked.connect(lambda: self._zoom(0.75))
+        self._map_btns["zoom_out"].clicked.connect(lambda: self._zoom(1.33))
+        self._map_btns["realms"].toggled.connect(self._on_realms_toggled)
+        self._map_btns["reset"].clicked.connect(self._reset_view)
+
+        return w
+
+    # ── Map helpers ───────────────────────────────────────────────────────────
+
+    def _show_placeholder(self):
+        ph = QWidget()
+        ph.setStyleSheet(f"background-color: {CARD};")
+        ph_lay = QVBoxLayout(ph)
+        lbl = QLabel("Run to generate map")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setStyleSheet(f"color: {DIM}; font-size: 13px; background: transparent;")
+        ph_lay.addWidget(lbl)
+        self._set_plot_widget(ph)
+
+    def _set_plot_widget(self, widget: QWidget):
+        if self._plot_widget is not None:
+            self._map_lay.removeWidget(self._plot_widget)
+            self._plot_widget.deleteLater()
+        self._plot_widget = widget
+        self._plot_widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        sys.exit()
+        self._map_lay.addWidget(self._plot_widget)
 
-    # ── pipeline ──────────────────────────────────────────────────────────
+    def _zoom(self, factor: float):
+        if isinstance(self._plot_widget, pg.PlotWidget):
+            self._plot_widget.getViewBox().scaleBy((factor, factor))
+
+    def _on_realms_toggled(self, _checked: bool):
+        if self._toggle_realms_fn:
+            self._toggle_realms_fn()
+
+    def _reset_view(self):
+        if isinstance(self._plot_widget, pg.PlotWidget):
+            self._plot_widget.autoRange()
+
+    def _open_in_window(self):
+        if self._coords is None or self._route is None:
+            return
+        win = MapWindow(self._coords, self._route, parent=self)
+        win.destroyed.connect(lambda: self._on_popup_closed(win))
+        self._map_windows.append(win)
+        win.show()
+        self._popup_overlay_btn.setEnabled(True)
+        if self._popup_overlay_btn.isChecked():
+            win._apply_overlay()
+
+    def _download_map(self):
+        if not isinstance(self._plot_widget, pg.PlotWidget):
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Map Image", "route_map.png", "PNG Image (*.png)"
+        )
+        if path:
+            pixmap = self._plot_widget.grab()
+            pixmap.save(path, "PNG")
+            self._log_append(f"Map saved: {path}\n")
+
+    def _set_map_btns_enabled(self, enabled: bool):
+        for btn in self._map_btns.values():
+            btn.setEnabled(enabled)
+
+    def _toggle_popup_overlay(self, checked: bool):
+        for win in self._map_windows:
+            if checked:
+                win._apply_overlay()
+            else:
+                win._remove_overlay()
+
+    def _on_popup_closed(self, win):
+        if win in self._map_windows:
+            self._map_windows.remove(win)
+        if not self._map_windows:
+            self._popup_overlay_btn.blockSignals(True)
+            self._popup_overlay_btn.setChecked(False)
+            self._popup_overlay_btn.blockSignals(False)
+            self._popup_overlay_btn.setEnabled(False)
+
+    # ── Drag and drop ─────────────────────────────────────────────────────────
+
+    _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff"}
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() and any(
+            Path(u.toLocalFile()).suffix.lower() in self._IMAGE_EXTS
+            for u in event.mimeData().urls() if u.isLocalFile()
+        ):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        added = False
+        for url in event.mimeData().urls():
+            if not url.isLocalFile():
+                continue
+            path = url.toLocalFile()
+            if Path(path).suffix.lower() in self._IMAGE_EXTS and path not in self._selected_files:
+                self._selected_files.append(path)
+                added = True
+        if added:
+            self._refresh_file_list()
+        event.acceptProposedAction()
+
+    # ── File helpers ──────────────────────────────────────────────────────────
+
+    def _add_files(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select Dino Scanner screenshots",
+            filter="Images (*.png *.jpg *.jpeg *.bmp *.tiff);;All files (*.*)",
+        )
+        for p in paths:
+            if p not in self._selected_files:
+                self._selected_files.append(p)
+        self._refresh_file_list()
+
+    def eventFilter(self, obj, event):
+        if obj is self._file_list and event.type() == QEvent.Type.KeyPress:
+            if (event.key() == Qt.Key.Key_V and
+                    event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+                self._paste_image()
+                return True
+        return super().eventFilter(obj, event)
+
+    def _paste_image(self):
+        from PIL import ImageGrab
+        try:
+            img = ImageGrab.grabclipboard()
+        except Exception:
+            return
+        if img is None:
+            return
+        self._paste_count += 1
+        path = str(Path(self._paste_dir) / f"pasted_{self._paste_count}.png")
+        img.save(path, "PNG")
+        if path not in self._selected_files:
+            self._selected_files.append(path)
+        self._refresh_file_list()
+
+    def _clear_files(self):
+        self._selected_files.clear()
+        self._refresh_file_list()
+
+    def _refresh_file_list(self):
+        self._file_list.clear()
+        for p in self._selected_files:
+            self._file_list.addItem(Path(p).name)
+
+    # ── Log ───────────────────────────────────────────────────────────────────
+
+    def _log_append(self, text: str):
+        self._log.moveCursor(self._log.textCursor().MoveOperation.End)
+        self._log.insertPlainText(text)
+        self._log.ensureCursorVisible()
+
+    # ── Progress ──────────────────────────────────────────────────────────────
+
+    def _on_progress(self, value: float):
+        if self._progress.isHidden():
+            self._progress.show()
+        if value < 0:
+            self._progress.setRange(0, 0)       # indeterminate (OCR loading)
+        else:
+            self._progress.setRange(0, 100)
+            self._progress.setValue(int(value * 100))
+
+    # ── Pipeline ──────────────────────────────────────────────────────────────
 
     def _run(self):
         if not self._selected_files:
             self._log_append("No screenshots selected.\n")
             return
-        self._run_btn.configure(state="disabled")
-        self._log.configure(state="normal")
-        self._log.delete("1.0", "end")
-        self._log.configure(state="disabled")
-        threading.Thread(target=self._pipeline, daemon=True).start()
+        self._log.clear()
+        self._run_btn.setEnabled(False)
+        self._pipeline = PipelineWorker(list(self._selected_files))
+        self._pipeline.log_message.connect(self._log_append)
+        self._pipeline.progress_set.connect(self._on_progress)
+        self._pipeline.finished_ok.connect(self._on_pipeline_done)
+        self._pipeline.finished_err.connect(self._on_pipeline_error)
+        self._pipeline.start()
 
-    def _pipeline(self):
-        old_stdout = sys.stdout
-        sys.stdout = _Redirect(self._log_write)
-        try:
-            self.after(0, self._spinner_start)
+    def _on_pipeline_done(self, coords: list, route: list):
+        # PlotWidget must be created on the main thread — do it here
+        from visualize import plot_route
+        plot_widget, toggle_fn = plot_route(coords, route)
 
-            # Phase 1 — load OCR engine
-            self._log_write("Loading OCR engine...\n")
-            from extract import _get_reader
-            _get_reader()
+        # Reset realms button without triggering the old toggle fn
+        self._map_btns["realms"].blockSignals(True)
+        self._map_btns["realms"].setChecked(False)
+        self._map_btns["realms"].blockSignals(False)
 
-            # Phase 2 — process screenshots (determinate bar)
-            self.after(0, self._progress_show_determinate)
+        self._toggle_realms_fn = toggle_fn
+        self._set_plot_widget(plot_widget)
+        self._set_map_btns_enabled(True)
+        self._dl_btn.setEnabled(True)
+        self._open_btn.setEnabled(True)
+        self._progress.hide()
+        self._run_btn.setEnabled(True)
+        self._coords = coords
+        self._route = route
 
-            def on_progress(current, total):
-                self.after(0, self._progress_set, current / total)
+    def _on_pipeline_error(self, msg: str):
+        self._log_append(f"\nError: {msg}\n")
+        self._progress.hide()
+        self._run_btn.setEnabled(True)
 
-            coords = extract_coordinates(list(self._selected_files),
-                                         progress_callback=on_progress)
+    # ── Auto-updater ──────────────────────────────────────────────────────────
 
-            if not coords:
-                self._log_write("\nNo coordinates found.\n")
-                return
+    def _check_for_updates(self):
+        self._upd_btn.setEnabled(False)
+        self._upd_btn.setText("Checking...")
+        self._update_worker = UpdateWorker()
+        self._update_worker.up_to_date.connect(self._on_up_to_date)
+        self._update_worker.update_found.connect(self._on_update_found)
+        self._update_worker.error.connect(self._on_update_error)
+        self._update_worker.start()
 
-            route = solve_tsp(coords)
-            total_dist = sum(
-                ((coords[route[i]][0] - coords[route[i - 1]][0]) ** 2
-                 + (coords[route[i]][1] - coords[route[i - 1]][1]) ** 2) ** 0.5
-                for i in range(1, len(route))
-            )
-            self._log_write(f"\nOptimal route — {len(coords)} stops, distance {total_dist:.1f}\n")
-            for step, idx in enumerate(route, 1):
-                lat, lon = coords[idx]
-                self._log_write(f"  Step {step:3d}:  Lat {lat:6.2f}  Long {lon:6.2f}\n")
+    def _on_up_to_date(self):
+        self._log_append(f"Already up to date (v{VERSION}).\n")
+        self._upd_btn.setText("Check for Updates")
+        self._upd_btn.setEnabled(True)
 
-            out = self._out_var.get()
-            self.after(0, plot_route, coords, route, out)
+    def _on_update_error(self, msg: str):
+        self._log_append(f"Update check failed: {msg}\n")
+        self._upd_btn.setText("Check for Updates")
+        self._upd_btn.setEnabled(True)
 
-        except Exception as exc:
-            self._log_write(f"\nError: {exc}\n")
-        finally:
-            sys.stdout = old_stdout
-            unload_reader()
-            self._log_write("OCR engine unloaded.\n")
-            self.after(0, self._spinner_stop)
-            self.after(0, self._progress_hide)
-            self.after(0, lambda: self._run_btn.configure(state="normal"))
+    def _on_update_found(self, tag: str, url: str):
+        self._log_append(f"Update available: v{tag} — downloading installer...\n")
+        self._upd_btn.setText("Downloading...")
+        self._dl_worker = DownloadWorker(url)
+        self._dl_worker.done.connect(self._on_installer_ready)
+        self._dl_worker.error.connect(self._on_update_error)
+        self._dl_worker.start()
+
+    def _on_installer_ready(self, installer_path: str):
+        self._log_append("Download complete! Click 'Relaunch to Update' to apply.\n")
+        self._upd_btn.setObjectName("update-ready")
+        self._upd_btn.setStyle(self._upd_btn.style())
+        self._upd_btn.setText("Relaunch to Update")
+        self._upd_btn.setEnabled(True)
+        self._upd_btn.clicked.disconnect()
+        self._upd_btn.clicked.connect(lambda: self._relaunch(installer_path))
+
+    def _relaunch(self, installer_path: str):
+        subprocess.Popen(
+            [installer_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        sys.exit()
 
 
-class _Redirect:
-    """Pipe stdout writes to the log widget."""
-    def __init__(self, write_fn):
-        self._write = write_fn
+# ── Utility ───────────────────────────────────────────────────────────────────
 
-    def write(self, text: str):
-        if text:
-            self._write(text)
+def _bold_label(text: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setStyleSheet("font-size: 12px; font-weight: bold;")
+    return lbl
 
-    def flush(self):
-        pass
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(_QSS)
+
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window,          QColor(BG))
+    palette.setColor(QPalette.ColorRole.WindowText,      QColor(TEXT))
+    palette.setColor(QPalette.ColorRole.Base,            QColor(BG))
+    palette.setColor(QPalette.ColorRole.AlternateBase,   QColor(CARD))
+    palette.setColor(QPalette.ColorRole.Text,            QColor(TEXT))
+    palette.setColor(QPalette.ColorRole.Button,          QColor(BTN2))
+    palette.setColor(QPalette.ColorRole.ButtonText,      QColor(TEXT))
+    palette.setColor(QPalette.ColorRole.Highlight,       QColor(ACCENT))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(BG))
+    app.setPalette(palette)
+
+    window = App()
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    main()
