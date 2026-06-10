@@ -24,7 +24,9 @@ echo.
 
 :: ── Step 2: Build exe with PyInstaller ──────────────────────────────────────
 echo [2/3] Building executable with PyInstaller...
-pyinstaller gui.spec --clean --noconfirm
+if exist "dist\" rmdir /s /q dist
+if exist "build\" rmdir /s /q build
+pyinstaller gui.spec --noconfirm
 if errorlevel 1 (
     echo.
     echo ERROR: PyInstaller build failed.
