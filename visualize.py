@@ -11,7 +11,7 @@ _PADDING = 5.0
 # If a point is within this GPS distance of the PREVIOUS labeled point, skip it.
 # Only the immediately preceding label is checked so distant-but-coincident
 # earlier steps (e.g. step 1 near step 7) never suppress a label.
-_CLUSTER_RADIUS = 3.0
+_CLUSTER_RADIUS = 1.0
 
 # Estimated full-label bounding box in GPS units (for collision detection).
 _LABEL_W = 12.0

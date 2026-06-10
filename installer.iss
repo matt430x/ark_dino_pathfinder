@@ -1,5 +1,5 @@
 #define AppName      "ARK Dino Pathfinder"
-#define AppVersion   "2.1"
+#define AppVersion   "2.2"
 #define AppPublisher "matt430"
 #define AppURL       "https://github.com/matt430x/ark_dino_pathfinder"
 #define AppExeName   "gui.exe"

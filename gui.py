@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QFileDialog, QFrame, QSizePolicy, QMessageBox,
 )
 
-VERSION = "2.1"
+VERSION = "2.2"
 _GITHUB_API = "https://api.github.com/repos/matt430x/ark_dino_pathfinder/releases/latest"
 
 # ── Colour tokens ─────────────────────────────────────────────────────────────
@@ -342,15 +342,6 @@ class MapWindow(QMainWindow):
             self._btns[name] = btn
             tb_lay.addWidget(btn)
 
-        tb_lay.addStretch()
-
-        self._aot_btn = QPushButton("📌")
-        self._aot_btn.setFixedSize(30, 26)
-        self._aot_btn.setToolTip("Always on top")
-        self._aot_btn.setCheckable(True)
-        self._aot_btn.setStyleSheet(_MAP_BTN_QSS)
-        tb_lay.addWidget(self._aot_btn)
-
         lay.addWidget(toolbar)
         lay.addWidget(self._plot_widget, 1)
 
@@ -358,21 +349,9 @@ class MapWindow(QMainWindow):
         self._btns["zoom_out"].clicked.connect(lambda: self._zoom(1.33))
         self._btns["realms"].toggled.connect(lambda _: self._toggle_realms_fn())
         self._btns["reset"].clicked.connect(self._plot_widget.autoRange)
-        self._aot_btn.toggled.connect(self._toggle_aot)
 
     def _zoom(self, factor: float):
         self._plot_widget.getViewBox().scaleBy((factor, factor))
-
-    def _toggle_aot(self, on: bool):
-        pos = self.pos()
-        flags = self.windowFlags()
-        if on:
-            flags |= Qt.WindowType.WindowStaysOnTopHint
-        else:
-            flags &= ~Qt.WindowType.WindowStaysOnTopHint
-        self.setWindowFlags(flags)
-        self.move(pos)
-        self.show()
 
     def _apply_overlay(self):
         """Auto-called when the window is opened. Enables always-on-top + click-through."""
@@ -398,12 +377,6 @@ class MapWindow(QMainWindow):
 
         self.setWindowOpacity(0.6)
         self.setWindowTitle("ARK Dino Pathfinder — Map  ▶  OVERLAY")
-        # blockSignals: _toggle_aot calls show() which re-creates the native window,
-        # which would wipe the WS_EX_TRANSPARENT style we just applied.
-        self._aot_btn.blockSignals(True)
-        self._aot_btn.setChecked(True)
-        self._aot_btn.blockSignals(False)
-        self._aot_btn.setEnabled(False)
 
     def _remove_overlay(self):
         try:
@@ -417,9 +390,12 @@ class MapWindow(QMainWindow):
             )
         except Exception:
             pass
+        pos = self.pos()
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+        self.move(pos)
+        self.show()
         self.setWindowOpacity(1.0)
         self.setWindowTitle("ARK Dino Pathfinder — Map")
-        self._aot_btn.setEnabled(True)
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
@@ -677,7 +653,7 @@ class App(QMainWindow):
     def _open_in_window(self):
         if self._coords is None or self._route is None:
             return
-        win = MapWindow(self._coords, self._route, parent=self)
+        win = MapWindow(self._coords, self._route, parent=None)
         win.destroyed.connect(lambda: self._on_popup_closed(win))
         self._map_windows.append(win)
         win.show()
@@ -715,6 +691,18 @@ class App(QMainWindow):
             self._popup_overlay_btn.setChecked(False)
             self._popup_overlay_btn.blockSignals(False)
             self._popup_overlay_btn.setEnabled(False)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.WindowStateChange and self.isMinimized():
+            for win in self._map_windows:
+                if win.isMinimized():
+                    win.showNormal()
+        super().changeEvent(event)
+
+    def closeEvent(self, event):
+        for win in list(self._map_windows):
+            win.close()
+        event.accept()
 
     # ── Drag and drop ─────────────────────────────────────────────────────────
 
