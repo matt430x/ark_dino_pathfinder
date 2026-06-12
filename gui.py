@@ -1,10 +1,12 @@
 """ARK Dino Pathfinder v2.0 — PyQt6 GUI."""
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -236,7 +238,7 @@ class PipelineWorker(QThread):
 
 class UpdateWorker(QThread):
     up_to_date   = pyqtSignal()
-    update_found = pyqtSignal(str, str)   # tag, download_url
+    update_found = pyqtSignal(str, str, str)   # tag, zip_url, exe_url
     error        = pyqtSignal(str)
 
     def run(self):
@@ -250,32 +252,55 @@ class UpdateWorker(QThread):
             if _ver(tag) <= _ver(VERSION):
                 self.up_to_date.emit()
                 return
-            url = next(
-                (a["browser_download_url"] for a in data.get("assets", [])
-                 if a["name"].lower().endswith(".exe")),
-                None,
+            assets = data.get("assets", [])
+            zip_url = next(
+                (a["browser_download_url"] for a in assets
+                 if a["name"].lower().endswith(".zip")),
+                "",
             )
-            if not url:
-                self.error.emit("No .exe installer found in release assets.")
+            exe_url = next(
+                (a["browser_download_url"] for a in assets
+                 if a["name"].lower().endswith(".exe")),
+                "",
+            )
+            if not zip_url and not exe_url:
+                self.error.emit("No update assets found in release.")
                 return
-            self.update_found.emit(tag, url)
+            self.update_found.emit(tag, zip_url, exe_url)
         except Exception as exc:
             self.error.emit(str(exc))
 
 
 class DownloadWorker(QThread):
-    done  = pyqtSignal(str)
-    error = pyqtSignal(str)
+    done     = pyqtSignal(str, bool)   # path, is_staged (True=staging dir, False=installer exe)
+    error    = pyqtSignal(str)
+    progress = pyqtSignal(int)         # 0-100
 
-    def __init__(self, url: str, parent=None):
+    def __init__(self, url: str, is_zip: bool = False, parent=None):
         super().__init__(parent)
-        self._url = url
+        self._url    = url
+        self._is_zip = is_zip
+
+    def _reporthook(self, block_num, block_size, total_size):
+        if total_size > 0:
+            self.progress.emit(min(99, int(block_num * block_size * 100 / total_size)))
 
     def run(self):
         try:
-            dst = tempfile.mktemp(suffix=".exe")
-            urllib.request.urlretrieve(self._url, dst)
-            self.done.emit(dst)
+            if self._is_zip:
+                tmp = Path(tempfile.mktemp(suffix=".zip"))
+                urllib.request.urlretrieve(self._url, str(tmp), reporthook=self._reporthook)
+                staging = Path(tempfile.mkdtemp(prefix="ARKUpdate_"))
+                with zipfile.ZipFile(tmp) as zf:
+                    zf.extractall(staging)
+                tmp.unlink()
+                self.progress.emit(100)
+                self.done.emit(str(staging), True)
+            else:
+                tmp = Path(tempfile.mktemp(suffix=".exe"))
+                urllib.request.urlretrieve(self._url, str(tmp), reporthook=self._reporthook)
+                self.progress.emit(100)
+                self.done.emit(str(tmp), False)
         except Exception as exc:
             self.error.emit(str(exc))
 
@@ -856,26 +881,66 @@ class App(QMainWindow):
         self._upd_btn.setText("Check for Updates")
         self._upd_btn.setEnabled(True)
 
-    def _on_update_found(self, tag: str, url: str):
-        self._log_append(f"Update available: v{tag} — downloading installer...\n")
-        self._upd_btn.setText("Downloading...")
-        self._dl_worker = DownloadWorker(url)
-        self._dl_worker.done.connect(self._on_installer_ready)
+    def _on_update_found(self, tag: str, zip_url: str, exe_url: str):
+        if zip_url:
+            self._log_append(f"Update available: v{tag} — downloading in background...\n")
+            self._dl_worker = DownloadWorker(zip_url, is_zip=True)
+        else:
+            self._log_append(f"Update available: v{tag} — downloading installer...\n")
+            self._dl_worker = DownloadWorker(exe_url, is_zip=False)
+        self._upd_btn.setText("Downloading... 0%")
+        self._dl_worker.progress.connect(lambda pct: self._upd_btn.setText(f"Downloading... {pct}%"))
+        self._dl_worker.done.connect(self._on_download_done)
         self._dl_worker.error.connect(self._on_update_error)
         self._dl_worker.start()
 
-    def _on_installer_ready(self, installer_path: str):
-        self._log_append("Download complete! Click 'Relaunch to Update' to apply.\n")
+    def _on_download_done(self, path: str, is_staged: bool):
+        self._update_path     = path
+        self._update_is_staged = is_staged
+        if is_staged:
+            self._log_append("Ready! Click 'Relaunch to Update' — swap will be instant.\n")
+        else:
+            self._log_append("Download complete! Click 'Relaunch to Update' to apply.\n")
         self._upd_btn.setObjectName("update-ready")
         self._upd_btn.setStyle(self._upd_btn.style())
         self._upd_btn.setText("Relaunch to Update")
         self._upd_btn.setEnabled(True)
         self._upd_btn.clicked.disconnect()
-        self._upd_btn.clicked.connect(lambda: self._relaunch(installer_path))
+        self._upd_btn.clicked.connect(self._relaunch)
 
-    def _relaunch(self, installer_path: str):
+    def _relaunch(self):
+        if getattr(self, "_update_is_staged", False):
+            self._relaunch_from_staging()
+        else:
+            self._relaunch_from_installer()
+
+    def _relaunch_from_installer(self):
         subprocess.Popen(
-            [installer_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"],
+            [self._update_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        sys.exit()
+
+    def _relaunch_from_staging(self):
+        if not getattr(sys, "frozen", False):
+            self._log_append("Staging update not supported in dev mode.\n")
+            return
+        install_dir = Path(sys.executable).parent
+        staging_dir = self._update_path
+        new_exe     = install_dir / "gui.exe"
+        pid         = os.getpid()
+        ps = (
+            f'try {{ Wait-Process -Id {pid} -ErrorAction SilentlyContinue }} catch {{}}\n'
+            f'Start-Sleep -Milliseconds 500\n'
+            f'Copy-Item -Path "{staging_dir}\\*" -Destination "{install_dir}" -Recurse -Force\n'
+            f'Start-Process "{new_exe}"\n'
+            f'Remove-Item -Path "{staging_dir}" -Recurse -Force -ErrorAction SilentlyContinue\n'
+        )
+        script = Path(tempfile.mktemp(suffix=".ps1"))
+        script.write_text(ps, encoding="utf-8")
+        subprocess.Popen(
+            ["powershell.exe", "-NonInteractive", "-WindowStyle", "Hidden",
+             "-ExecutionPolicy", "Bypass", "-File", str(script)],
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         sys.exit()

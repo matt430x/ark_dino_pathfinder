@@ -62,9 +62,15 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.version.outputs.VERSION }} installer.iss
 
+      - name: Create update zip
+        run: |
+          Compress-Archive -Path "dist\gui\*" -DestinationPath "installer_output\ARKDinoPathfinder_Update_v${{ steps.version.outputs.VERSION }}.zip"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: v${{ steps.version.outputs.VERSION }}
-          files: installer_output/ARKDinoPathfinder_Setup_v${{ steps.version.outputs.VERSION }}.exe
+          files: |
+            installer_output/ARKDinoPathfinder_Setup_v${{ steps.version.outputs.VERSION }}.exe
+            installer_output/ARKDinoPathfinder_Update_v${{ steps.version.outputs.VERSION }}.zip
           generate_release_notes: true
