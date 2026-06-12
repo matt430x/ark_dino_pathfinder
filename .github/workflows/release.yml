@@ -46,11 +46,16 @@ jobs:
       - name: Download EasyOCR models
         run: python download_models.py
 
-      - name: Read version from gui.py
+      - name: Read version from tag
         id: version
         run: |
-          $v = python -c "from gui import VERSION; print(VERSION)"
+          $v = "${{ github.ref_name }}" -replace '^v', ''
           "VERSION=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Patch VERSION in gui.py
+        run: |
+          $v = "${{ steps.version.outputs.VERSION }}"
+          (Get-Content gui.py) -replace 'VERSION = ".*"', "VERSION = `"$v`"" | Set-Content gui.py
 
       - name: Build exe with PyInstaller
         run: pyinstaller gui.spec --noconfirm

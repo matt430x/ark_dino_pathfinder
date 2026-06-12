@@ -897,9 +897,7 @@ class App(QMainWindow):
     def _on_download_done(self, path: str, is_staged: bool):
         self._update_path     = path
         self._update_is_staged = is_staged
-        if is_staged:
-            self._log_append("Ready! Click 'Relaunch to Update' — swap will be instant.\n")
-        else:
+        if not is_staged:
             self._log_append("Download complete! Click 'Relaunch to Update' to apply.\n")
         self._upd_btn.setObjectName("update-ready")
         self._upd_btn.setStyle(self._upd_btn.style())
