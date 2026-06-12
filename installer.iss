@@ -1,5 +1,7 @@
 #define AppName      "ARK Dino Pathfinder"
-#define AppVersion   "2.2"
+#ifndef AppVersion
+  #error AppVersion must be supplied on the command line: /DAppVersion=x.x
+#endif
 #define AppPublisher "matt430"
 #define AppURL       "https://github.com/matt430x/ark_dino_pathfinder"
 #define AppExeName   "gui.exe"
@@ -54,7 +56,7 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall
 
 [UninstallDelete]
 ; Clean up temp files written by the app next to the exe

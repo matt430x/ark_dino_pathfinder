@@ -1,5 +1,5 @@
 # ARK Dino Pathfinder
-**by matt430** · v2.2
+**by matt430** · v2.4
 
 A tool for ARK: Survival Evolved players that reads your Dino Scanner screenshots, extracts all GPS coordinates automatically using OCR, solves the optimal visit route, and displays it on an interactive embedded map — so you never waste time backtracking across the map again.
 
@@ -184,7 +184,7 @@ python main.py
 build.bat
 ```
 
-The installer is written to `installer_output\ARKDinoPathfinder_Setup_v2.2.exe`.
+The installer is written to `installer_output\ARKDinoPathfinder_Setup_v2.4.exe`.
 
 ---
 

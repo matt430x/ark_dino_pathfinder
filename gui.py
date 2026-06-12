@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QFileDialog, QFrame, QSizePolicy, QMessageBox,
 )
 
-VERSION = "2.2"
+VERSION = "2.4"
 _GITHUB_API = "https://api.github.com/repos/matt430x/ark_dino_pathfinder/releases/latest"
 
 # ── Colour tokens ─────────────────────────────────────────────────────────────
