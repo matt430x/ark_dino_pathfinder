@@ -276,10 +276,11 @@ class DownloadWorker(QThread):
     error    = pyqtSignal(str)
     progress = pyqtSignal(int)         # 0-100
 
-    def __init__(self, url: str, is_zip: bool = False, parent=None):
+    def __init__(self, url: str, is_zip: bool = False, staging_dir: str = "", parent=None):
         super().__init__(parent)
-        self._url    = url
-        self._is_zip = is_zip
+        self._url         = url
+        self._is_zip      = is_zip
+        self._staging_dir = staging_dir
 
     def _reporthook(self, block_num, block_size, total_size):
         if total_size > 0:
@@ -290,7 +291,11 @@ class DownloadWorker(QThread):
             if self._is_zip:
                 tmp = Path(tempfile.mktemp(suffix=".zip"))
                 urllib.request.urlretrieve(self._url, str(tmp), reporthook=self._reporthook)
-                staging = Path(tempfile.mkdtemp(prefix="ARKUpdate_"))
+                if self._staging_dir:
+                    staging = Path(self._staging_dir)
+                    staging.mkdir(parents=True, exist_ok=True)
+                else:
+                    staging = Path(tempfile.mkdtemp(prefix="ARKUpdate_"))
                 with zipfile.ZipFile(tmp) as zf:
                     zf.extractall(staging)
                 tmp.unlink()
@@ -884,7 +889,10 @@ class App(QMainWindow):
     def _on_update_found(self, tag: str, zip_url: str, exe_url: str):
         if zip_url:
             self._log_append(f"Update available: v{tag} — downloading in background...\n")
-            self._dl_worker = DownloadWorker(zip_url, is_zip=True)
+            staging_dir = ""
+            if getattr(sys, "frozen", False):
+                staging_dir = str(Path(sys.executable).parent / "_staging")
+            self._dl_worker = DownloadWorker(zip_url, is_zip=True, staging_dir=staging_dir)
         else:
             self._log_append(f"Update available: v{tag} — downloading installer...\n")
             self._dl_worker = DownloadWorker(exe_url, is_zip=False)
@@ -923,17 +931,29 @@ class App(QMainWindow):
         if not getattr(sys, "frozen", False):
             self._log_append("Staging update not supported in dev mode.\n")
             return
-        install_dir = Path(sys.executable).parent
-        staging_dir = self._update_path
-        new_exe     = install_dir / "gui.exe"
-        pid         = os.getpid()
-        ps = (
-            f'try {{ Wait-Process -Id {pid} -ErrorAction SilentlyContinue }} catch {{}}\n'
-            f'Start-Sleep -Milliseconds 500\n'
-            f'Copy-Item -Path "{staging_dir}\\*" -Destination "{install_dir}" -Recurse -Force\n'
-            f'Start-Process "{new_exe}"\n'
-            f'Remove-Item -Path "{staging_dir}" -Recurse -Force -ErrorAction SilentlyContinue\n'
-        )
+        install_dir  = Path(sys.executable).parent
+        staging      = Path(self._update_path)
+        new_exe      = install_dir / "gui.exe"
+        old_internal = install_dir / "_internal_old"
+        old_exe      = install_dir / "gui.exe.old"
+        pid          = os.getpid()
+        ps = "\n".join([
+            f'try {{ Wait-Process -Id {pid} -ErrorAction SilentlyContinue }} catch {{}}',
+            f'Start-Sleep -Milliseconds 300',
+            # swap _internal — instant rename on same drive
+            f'if (Test-Path "{old_internal}") {{ Remove-Item "{old_internal}" -Recurse -Force }}',
+            f'Rename-Item -Path "{install_dir}\\_internal" -NewName "_internal_old"',
+            f'Move-Item -Path "{staging}\\_internal" -Destination "{install_dir}\\_internal"',
+            # swap gui.exe — instant rename on same drive
+            f'if (Test-Path "{old_exe}") {{ Remove-Item "{old_exe}" -Force }}',
+            f'Rename-Item -Path "{new_exe}" -NewName "gui.exe.old"',
+            f'Move-Item -Path "{staging}\\gui.exe" -Destination "{new_exe}"',
+            # launch immediately — old files cleaned up after
+            f'Start-Process "{new_exe}"',
+            f'Remove-Item "{staging}" -Recurse -Force -ErrorAction SilentlyContinue',
+            f'Remove-Item "{old_internal}" -Recurse -Force -ErrorAction SilentlyContinue',
+            f'Remove-Item "{old_exe}" -Force -ErrorAction SilentlyContinue',
+        ])
         script = Path(tempfile.mktemp(suffix=".ps1"))
         script.write_text(ps, encoding="utf-8")
         subprocess.Popen(
